@@ -78,12 +78,50 @@ struct SensorList: View {
                 .font(.footnote)
                 Button("Disconnect", role: .destructive) { relay.disconnect() }
             }
+            FirmwareSection(updater: relay.updater)
             Section("Sensors") {
                 ForEach(relay.rows) { row in
                     if let def = Sensors.all.first(where: { $0.id == row.id }) {
                         SensorCell(def: def, row: row, relay: relay)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Firmware versions on the board, what nRF Cloud has, and the Update buttons.
+struct FirmwareSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Section("Firmware") {
+            row(.bt, updater.btVersion, updater.latestBt)
+            row(.lte, updater.lteVersion, updater.latestLte)
+            if updater.busy != nil {
+                ProgressView(value: updater.progress)
+            }
+            if !updater.message.isEmpty {
+                Text(updater.message).font(.footnote).foregroundStyle(.secondary)
+            }
+            Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
+                .disabled(updater.busy != nil)
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ chip: Updater.Chip, _ running: String, _ latest: Updater.Release?) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(chip.rawValue)
+                Text(latest.map { "running \(running) · newest \($0.version)" } ?? "running \(running)")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let latest {
+                Button(latest.version == running ? "Reinstall" : "Update") { updater.start(chip) }
+                    .buttonStyle(.bordered)
+                    .disabled(updater.busy != nil)
             }
         }
     }
