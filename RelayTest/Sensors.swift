@@ -83,9 +83,11 @@ enum Sensors {
     static func charger(_ state: Int32) -> String {
         switch state {
         case 0: return "on battery"
-        case 1, 2, 3: return "charging"
-        case 4: return "charged"
-        case 5: return "on USB, not charging"
+        case 1, 2, 3: return "plugged in, charging"
+        case 4: return "plugged in, charged"
+        case 5: return "plugged in, not charging"
+        case 6: return "plugged in, charging problem"
+        case 7: return "plugged in, checking battery"
         default: return "charger ?"
         }
     }
