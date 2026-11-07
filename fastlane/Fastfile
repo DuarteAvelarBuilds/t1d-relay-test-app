@@ -44,7 +44,7 @@ platform :ios do
     begin
       number = latest_testflight_build_number(app_identifier: BUNDLE_ID, initial_build_number: 0) + 1
     rescue => e
-      UI.user_error!("App Store Connect has no app for #{BUNDLE_ID} yet. Create it (README, step 3), then run this again. (#{e.message})")
+      UI.user_error!("App Store Connect has no app for #{BUNDLE_ID} yet. Create it (README, step 4), then run this again. (#{e.message})")
     end
 
     match(
