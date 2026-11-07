@@ -50,7 +50,11 @@ enum Sensors {
                       guard v.count >= 2 else { return "?" }
                       let base = String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
                       guard v.count >= 3 else { return base }
-                      return base + " · " + Sensors.charger(v[2])
+                      var text = base + " · " + Sensors.charger(v[2])
+                      if v.count >= 4 && v[3] >= 0 {
+                          text += String(format: " (0x%02X)", v[3])
+                      }
+                      return text
                   },
                   graphValue: nil),
         SensorDef(id: 6, name: "LTE signal", detail: "Modem RSRP",
