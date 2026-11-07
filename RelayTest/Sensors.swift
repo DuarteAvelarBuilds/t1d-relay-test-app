@@ -44,11 +44,13 @@ enum Sensors {
                       return "R \(v[0])  G \(v[1])  B \(v[2])  IR \(v[3])"
                   },
                   graphValue: { v in Double(v[1]) }),
-        SensorDef(id: 5, name: "Battery", detail: "ADP5360 fuel gauge",
+        SensorDef(id: 5, name: "Battery", detail: "ADP5360 fuel gauge and charger",
                   intervals: [10000, 5000, 1000], defaultInterval: 5000,
                   format: { v in
                       guard v.count >= 2 else { return "?" }
-                      return String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
+                      let base = String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
+                      guard v.count >= 3 else { return base }
+                      return base + " · " + Sensors.charger(v[2])
                   },
                   graphValue: nil),
         SensorDef(id: 6, name: "LTE signal", detail: "Modem RSRP",
@@ -72,6 +74,17 @@ enum Sensors {
                   },
                   graphValue: nil),
     ]
+
+    /// ADP5360 charger status (firmware 0.4.2 and later).
+    static func charger(_ state: Int32) -> String {
+        switch state {
+        case 0: return "on battery"
+        case 1, 2, 3: return "charging"
+        case 4: return "charged"
+        case 5: return "on USB, not charging"
+        default: return "charger ?"
+        }
+    }
 
     static func xyz(_ v: [Int32]) -> String {
         guard v.count >= 3 else { return "?" }
