@@ -69,7 +69,9 @@ final class Relay: NSObject, ObservableObject {
         guard central.state == .poweredOn else { return }
         found = []
         status = .scanning
-        central.scanForPeripherals(withServices: [Self.serviceUUID],
+        // No service filter: iOS may not match a UUID that is only in the scan
+        // response, so look at everything and pick the relay out below.
+        central.scanForPeripherals(withServices: nil,
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
     }
 
@@ -188,12 +190,17 @@ extension Relay: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
-            ?? peripheral.name ?? "Relay"
+            ?? peripheral.name ?? ""
+        let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        guard services.contains(Self.serviceUUID) || name.localizedCaseInsensitiveContains("T1D") else {
+            return
+        }
+        let shown = name.isEmpty ? "T1D relay" : name
         if let i = found.firstIndex(where: { $0.id == peripheral.identifier }) {
             found[i].rssi = RSSI.intValue
-            found[i].name = name
+            found[i].name = shown
         } else {
-            found.append(Found(id: peripheral.identifier, peripheral: peripheral, name: name,
+            found.append(Found(id: peripheral.identifier, peripheral: peripheral, name: shown,
                                rssi: RSSI.intValue))
         }
     }
