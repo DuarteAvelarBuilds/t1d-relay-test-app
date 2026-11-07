@@ -1,0 +1,25 @@
+# Xcode project definition. CI turns this into RelayTest.xcodeproj with
+# XcodeGen (`brew install xcodegen && xcodegen`), so no .xcodeproj is kept in git.
+name: RelayTest
+options:
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  RelayTest:
+    type: application
+    platform: iOS
+    sources: [RelayTest]
+    scheme: {}
+    settings:
+      base:
+        # The TestFlight build replaces this with org.duarteavelarbuilds.<TEAMID>.relaytest
+        PRODUCT_BUNDLE_IDENTIFIER: org.duarteavelarbuilds.relaytest
+        INFOPLIST_FILE: RelayTest/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: NO

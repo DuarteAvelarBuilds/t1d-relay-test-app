@@ -1,0 +1,79 @@
+# Builds Relay Test and sends it to TestFlight, the same way the Trio fork
+# does: an App Store Connect API key, and certificates kept by match in the
+# org's Match-Secrets repo. All values come from the org's Actions secrets.
+
+require "base64"
+
+default_platform(:ios)
+
+TEAMID = ENV["TEAMID"]
+GH_PAT = ENV["GH_PAT"]
+OWNER = ENV["GITHUB_REPOSITORY_OWNER"]
+BUNDLE_ID = "org.duarteavelarbuilds.#{TEAMID}.relaytest"
+PROJECT = "RelayTest.xcodeproj"
+
+platform :ios do
+  private_lane :connect do
+    app_store_connect_api_key(
+      key_id: ENV["FASTLANE_KEY_ID"],
+      issuer_id: ENV["FASTLANE_ISSUER_ID"],
+      key_content: ENV["FASTLANE_KEY"]
+    )
+  end
+
+  desc "Register the app's identifier with Apple (does nothing if it exists)"
+  lane :identifiers do
+    connect
+    if Spaceship::ConnectAPI::BundleId.find(BUNDLE_ID).nil?
+      Spaceship::ConnectAPI::BundleId.create(
+        name: "T1D Relay Test",
+        identifier: BUNDLE_ID,
+        platform: Spaceship::ConnectAPI::BundleIdPlatform::IOS
+      )
+      UI.success("Registered #{BUNDLE_ID}")
+    else
+      UI.message("#{BUNDLE_ID} is already registered")
+    end
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :build do
+    setup_ci if ENV["CI"]
+    identifiers
+
+    begin
+      number = latest_testflight_build_number(app_identifier: BUNDLE_ID, initial_build_number: 0) + 1
+    rescue => e
+      UI.user_error!("App Store Connect has no app for #{BUNDLE_ID} yet. Create it (README, step 3), then run this again. (#{e.message})")
+    end
+
+    match(
+      type: "appstore",
+      app_identifier: [BUNDLE_ID],
+      team_id: TEAMID,
+      storage_mode: "git",
+      git_url: "https://github.com/#{OWNER}/Match-Secrets",
+      git_basic_authorization: Base64.strict_encode64("#{OWNER}:#{GH_PAT}"),
+      readonly: false
+    )
+    profile = ENV["sigh_#{BUNDLE_ID}_appstore_profile-name"]
+
+    build_app(
+      project: PROJECT,
+      scheme: "RelayTest",
+      configuration: "Release",
+      export_method: "app-store",
+      xcargs: [
+        "DEVELOPMENT_TEAM=#{TEAMID}",
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY='iPhone Distribution'",
+        "PROVISIONING_PROFILE_SPECIFIER='#{profile}'",
+        "PRODUCT_BUNDLE_IDENTIFIER=#{BUNDLE_ID}",
+        "CURRENT_PROJECT_VERSION=#{number}"
+      ].join(" "),
+      export_options: { provisioningProfiles: { BUNDLE_ID => profile } }
+    )
+
+    upload_to_testflight(app_identifier: BUNDLE_ID, skip_waiting_for_build_processing: true)
+  end
+end

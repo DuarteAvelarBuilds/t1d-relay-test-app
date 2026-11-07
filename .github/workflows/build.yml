@@ -1,0 +1,61 @@
+name: Build
+
+# macOS build minutes count 10x on a private repo, so each change builds once:
+# pull requests only check it compiles; main (or Run workflow) builds for TestFlight.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Pull requests: does it compile? No signing, no secrets.
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen
+      - name: Compile
+        run: |
+          set -o pipefail
+          xcodebuild -project RelayTest.xcodeproj -scheme RelayTest \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 40
+
+  # Changes on main (or Run workflow): build, sign and send to TestFlight.
+  testflight:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    env:
+      TEAMID: ${{ secrets.TEAMID }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      FASTLANE_KEY_ID: ${{ secrets.FASTLANE_KEY_ID }}
+      FASTLANE_ISSUER_ID: ${{ secrets.FASTLANE_ISSUER_ID }}
+      FASTLANE_KEY: ${{ secrets.FASTLANE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the org secrets reach this repo
+        run: |
+          missing=""
+          for s in TEAMID GH_PAT MATCH_PASSWORD FASTLANE_KEY_ID FASTLANE_ISSUER_ID FASTLANE_KEY; do
+            [ -n "${!s}" ] || missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets:$missing. Give this repo access to the org secrets (README, step 2)."
+            exit 1
+          fi
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - name: Make the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen
+      - name: Build and upload to TestFlight
+        run: bundle exec fastlane build

@@ -1,0 +1,9 @@
+RelayTest.xcodeproj/
+build/
+*.ipa
+*.dSYM.zip
+fastlane/report.xml
+fastlane/README.md
+fastlane/test_output
+Gemfile.lock
+.DS_Store
