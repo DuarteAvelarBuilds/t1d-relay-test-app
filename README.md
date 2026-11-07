@@ -20,6 +20,11 @@ is described in that repo's `docs/ble-test-service.md`.
 - The switch turns a sensor off. "Asked: ..." changes its rate; the menu
   only offers rates the board can handle.
 - The screen stays on while connected.
+- **Firmware**: what each chip runs, the newest release on nRF Cloud
+  (Check for updates), and an Update button per chip. The Bluetooth chip
+  takes about a minute and a half, the LTE chip about a minute. Each chip
+  boots the new firmware on trial and goes back to the old one unless it
+  works, so an interrupted update is harmless.
 
 | Sensor | Starts at | Fastest offered |
 | --- | --- | --- |
@@ -61,6 +66,13 @@ All sensors share a wire between the board's two chips that carries about
    top, then **Internal Testing** on the left. Click **+** to make a group,
    add yourself, and add the build. Install it from the TestFlight app on
    your iPhone.
+
+7. **Firmware updates (optional)**: the Firmware section needs the
+   nRF Cloud project key. Open
+   https://github.com/DuarteAvelarBuilds/t1d-relay-test-app/settings/secrets/actions ,
+   click **New repository secret**, name it `MEMFAULT_PROJECT_KEY`, and
+   paste the same project key the firmware repo uses (nRF Cloud: Project
+   settings, Project key). Then run the build again (step 3).
 
 After that, every change merged to `main` builds and goes to TestFlight by
 itself. TestFlight builds expire after 90 days; run the workflow again to

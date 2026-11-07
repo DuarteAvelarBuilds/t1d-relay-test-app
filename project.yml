@@ -9,6 +9,9 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # nRF Cloud (Memfault) project key, for finding firmware releases. CI
+    # passes the MEMFAULT_PROJECT_KEY secret; empty means no update check.
+    MEMFAULT_PROJECT_KEY: ""
 targets:
   RelayTest:
     type: application

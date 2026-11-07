@@ -65,6 +65,7 @@ platform :ios do
       export_method: "app-store",
       xcargs: [
         "DEVELOPMENT_TEAM=#{TEAMID}",
+        "MEMFAULT_PROJECT_KEY=#{ENV.fetch('MEMFAULT_PROJECT_KEY', '')}",
         "CODE_SIGN_STYLE=Manual",
         "CODE_SIGN_IDENTITY='iPhone Distribution'",
         "PROVISIONING_PROFILE_SPECIFIER='#{profile}'",

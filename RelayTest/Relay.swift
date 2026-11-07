@@ -22,6 +22,10 @@ final class Relay: NSObject, ObservableObject {
     static let dataUUID = CBUUID(string: "42800002-C846-48AD-9A69-38EF49048320")
     static let controlUUID = CBUUID(string: "42800003-C846-48AD-9A69-38EF49048320")
     static let infoUUID = CBUUID(string: "42800004-C846-48AD-9A69-38EF49048320")
+    static let updateUUID = CBUUID(string: "42800005-C846-48AD-9A69-38EF49048320")
+    /// mcumgr (SMP) over Bluetooth, for updating the Bluetooth chip itself.
+    static let smpServiceUUID = CBUUID(string: "8D53DC1D-1DB7-4CD3-868B-8A527460AA84")
+    static let smpUUID = CBUUID(string: "DA2E7828-FBCE-4E01-AE9E-261174997C48")
 
     enum Status: Equatable {
         case bluetoothOff, scanning, connecting, connected, disconnected(String)
@@ -39,11 +43,14 @@ final class Relay: NSObject, ObservableObject {
     @Published var rows: [SensorRow] = Sensors.all.map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
     @Published var info = ""
     @Published var linkRssi: Int?
+    let updater = Updater()
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var control: CBCharacteristic?
+    private var infoChar: CBCharacteristic?
     private var refresh: Timer?
+    private var ticks = 0
 
     /// Raw per-sensor state, updated on every notification (not published).
     private struct Live {
@@ -61,6 +68,15 @@ final class Relay: NSObject, ObservableObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+        updater.stopStreams = { [weak self] in self?.allOff() }
+    }
+
+    /// Every sensor off (during a firmware update).
+    func allOff() {
+        for i in rows.indices { rows[i].enabled = false }
+        if let p = peripheral, let c = control {
+            p.writeValue(Data([2]), for: c, type: .withResponse)
+        }
     }
 
     // MARK: Actions
@@ -166,6 +182,12 @@ final class Relay: NSObject, ObservableObject {
             }
         }
         peripheral?.readRSSI()
+        // The LTE chip's version and serial reach the Info text a little
+        // after connecting, so read it again now and then.
+        ticks += 1
+        if ticks % 20 == 0, let p = peripheral, let c = infoChar {
+            p.readValue(for: c)
+        }
     }
 
     private func reset(_ why: String) {
@@ -173,7 +195,13 @@ final class Relay: NSObject, ObservableObject {
         refresh = nil
         peripheral = nil
         control = nil
+        infoChar = nil
         linkRssi = nil
+        updater.connectionLost()
+        updater.peripheral = nil
+        updater.smp = nil
+        updater.update = nil
+        updater.control = nil
         status = .disconnected(why)
     }
 }
@@ -206,7 +234,7 @@ extension Relay: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.discoverServices([Self.serviceUUID])
+        peripheral.discoverServices([Self.serviceUUID, Self.smpServiceUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
@@ -226,7 +254,12 @@ extension Relay: CBPeripheralDelegate {
             disconnect()
             return
         }
-        peripheral.discoverCharacteristics([Self.dataUUID, Self.controlUUID, Self.infoUUID], for: s)
+        peripheral.discoverCharacteristics([Self.dataUUID, Self.controlUUID, Self.infoUUID,
+                                            Self.updateUUID], for: s)
+        if let smp = peripheral.services?.first(where: { $0.uuid == Self.smpServiceUUID }) {
+            peripheral.discoverCharacteristics([Self.smpUUID], for: smp)
+        }
+        updater.peripheral = peripheral
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
@@ -234,8 +267,18 @@ extension Relay: CBPeripheralDelegate {
         for c in service.characteristics ?? [] {
             switch c.uuid {
             case Self.dataUUID: peripheral.setNotifyValue(true, for: c)
-            case Self.controlUUID: control = c
-            case Self.infoUUID: peripheral.readValue(for: c)
+            case Self.controlUUID:
+                control = c
+                updater.control = c
+            case Self.infoUUID:
+                infoChar = c
+                peripheral.readValue(for: c)
+            case Self.updateUUID:
+                updater.update = c
+                peripheral.setNotifyValue(true, for: c)
+            case Self.smpUUID:
+                updater.smp = c
+                peripheral.setNotifyValue(true, for: c)
             default: break
             }
         }
@@ -257,6 +300,11 @@ extension Relay: CBPeripheralDelegate {
             if let r = Reading(data) { handle(r) }
         case Self.infoUUID:
             info = String(decoding: data, as: UTF8.self)
+            updater.parseInfo(info)
+        case Self.updateUUID:
+            updater.updateNotification(data)
+        case Self.smpUUID:
+            updater.smpResponse(data)
         default:
             break
         }
