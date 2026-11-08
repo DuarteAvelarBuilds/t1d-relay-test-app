@@ -101,14 +101,18 @@ struct FirmwareSection: View {
         Section("Firmware") {
             row(.bt, updater.btVersion, updater.latestBt)
             row(.lte, updater.lteVersion, updater.latestLte)
-            if updater.busy != nil {
+            if updater.busy != nil || updater.updatingAll {
                 ProgressView(value: updater.progress)
             }
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
             }
+            if updater.checked && updater.outdated.count > 1 {
+                Button("Update all") { updater.updateAll() }
+                    .disabled(updater.busy != nil || updater.updatingAll)
+            }
             Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
-                .disabled(updater.busy != nil)
+                .disabled(updater.busy != nil || updater.updatingAll)
         }
     }
 
@@ -124,7 +128,7 @@ struct FirmwareSection: View {
             if let latest {
                 Button(latest.version == running ? "Reinstall" : "Update") { updater.start(chip) }
                     .buttonStyle(.bordered)
-                    .disabled(updater.busy != nil)
+                    .disabled(updater.busy != nil || updater.updatingAll)
             }
         }
     }
