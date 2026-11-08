@@ -316,17 +316,17 @@ final class Updater: ObservableObject {
         message = text
     }
 
-    private func arm(_ seconds: TimeInterval, _ retry: @escaping () -> Void) {
+    private func arm(_ seconds: TimeInterval, tries limit: Int = 3, _ retry: @escaping () -> Void) {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             guard let self, self.busy != nil else { return }
             self.tries += 1
-            if self.tries > 3 {
+            if self.tries > limit {
                 let who = self.busy == .lte ? "the LTE chip (through the Bluetooth chip)" : "the Bluetooth chip"
                 self.retryLater(self.busy!, "No answer from \(who).")
             } else {
                 self.outbox.removeAll() // a retry sends it all again
-                self.message = "No answer yet, asking again (\(self.tries) of 3)…"
+                self.message = "No answer yet, asking again (\(self.tries) of \(limit))…"
                 retry()
             }
         }
@@ -419,7 +419,10 @@ final class Updater: ObservableObject {
             write([0x11] + le32(UInt32(off)) + [UInt8](image.subdata(in: off..<off + n)))
             off += n
         }
-        arm(3) { [weak self] in self?.lteSendWindow() }
+        // A window's answer normally comes back in well under half a second
+        // (the 3 s wait in lteBegin is for the chip making room). Waiting 3 s
+        // here turned every lost answer into a long pause.
+        arm(1, tries: 8) { [weak self] in self?.lteSendWindow() }
     }
 
     func updateNotification(_ data: Data) {
