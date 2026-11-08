@@ -60,6 +60,10 @@ final class Updater: ObservableObject {
     private var allQueue: [Chip] = []
     /// After the LTE chip's update: the version to see before going on.
     private var waitingForLte: String?
+    /// When the LTE chip got its image. A reinstall keeps the same version,
+    /// so the version alone can't show it has restarted: wait at least 15 s
+    /// and for the Bluetooth chip to hear it again.
+    private var lteSentAt = Date.distantPast
     private var waitTimer: Timer?
     /// After a stall: the chip to update again once the chips can talk again
     /// (the stuck chip restarts itself, the app reconnects).
@@ -88,7 +92,8 @@ final class Updater: ObservableObject {
             resumeTimer?.invalidate()
             begin(c)
         }
-        if let want = waitingForLte, lteVersion.hasPrefix(want) {
+        if let want = waitingForLte, lteVersion.hasPrefix(want),
+           Date().timeIntervalSince(lteSentAt) > 15, (heard ?? 0) <= 10 {
             waitingForLte = nil
             waitTimer?.invalidate()
             startNextOfAll()
@@ -119,11 +124,13 @@ final class Updater: ObservableObject {
 
     func updateAll() {
         guard busy == nil, !updatingAll else { return }
-        allQueue = outdated
-        guard !allQueue.isEmpty else {
-            message = "Both chips already run the newest firmware."
+        // Both chips every time, LTE first: an update where either is
+        // behind, a reinstall of both when they're current.
+        guard latestLte != nil, latestBt != nil else {
+            message = "Check for updates first."
             return
         }
+        allQueue = [.lte, .bt]
         updatingAll = true
         startNextOfAll()
     }
@@ -430,6 +437,7 @@ final class Updater: ObservableObject {
                 // The Bluetooth chip goes next, once the LTE chip is back and
                 // reports the new version (the app re-reads it every few seconds).
                 waitingForLte = want
+                lteSentAt = Date()
                 message = "LTE chip restarting on \(want). The Bluetooth chip goes next, once the LTE chip is back (about 30 s)…"
                 waitTimer?.invalidate()
                 waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
