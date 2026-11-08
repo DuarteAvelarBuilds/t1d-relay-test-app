@@ -34,6 +34,9 @@ struct DeviceList: View {
                     Label("Looking for the relay…", systemImage: "antenna.radiowaves.left.and.right")
                 case .connecting:
                     Label("Connecting…", systemImage: "link")
+                case .reconnecting:
+                    Label("Reconnecting… (the relay may be restarting)", systemImage: "arrow.triangle.2.circlepath")
+                    Button("Stop") { relay.disconnect() }
                 case .disconnected(let why):
                     Text(why).foregroundStyle(.orange)
                     Button("Look again") { relay.startScan() }

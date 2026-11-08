@@ -28,7 +28,7 @@ final class Relay: NSObject, ObservableObject {
     static let smpUUID = CBUUID(string: "DA2E7828-FBCE-4E01-AE9E-261174997C48")
 
     enum Status: Equatable {
-        case bluetoothOff, scanning, connecting, connected, disconnected(String)
+        case bluetoothOff, scanning, connecting, reconnecting, connected, disconnected(String)
     }
 
     struct Found: Identifiable {
@@ -50,6 +50,8 @@ final class Relay: NSObject, ObservableObject {
     private var control: CBCharacteristic?
     private var infoChar: CBCharacteristic?
     private var refresh: Timer?
+    /// The user tapped Disconnect, so don't reconnect by ourselves.
+    private var userDisconnected = false
     private var ticks = 0
 
     /// Raw per-sensor state, updated on every notification (not published).
@@ -96,10 +98,12 @@ final class Relay: NSObject, ObservableObject {
         peripheral = f.peripheral
         f.peripheral.delegate = self
         status = .connecting
+        userDisconnected = false
         central.connect(f.peripheral)
     }
 
     func disconnect() {
+        userDisconnected = true
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
@@ -245,6 +249,14 @@ extension Relay: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
         reset(error.map { "Connection lost: \($0.localizedDescription)" } ?? "Disconnected")
+        // The relay restarts after a firmware update, or wanders out of range:
+        // ask iOS to reconnect as soon as it's back (a pending connect never times out).
+        if !userDisconnected {
+            self.peripheral = peripheral
+            peripheral.delegate = self
+            status = .reconnecting
+            central.connect(peripheral)
+        }
     }
 }
 
