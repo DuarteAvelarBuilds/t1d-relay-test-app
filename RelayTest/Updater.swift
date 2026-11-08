@@ -101,11 +101,29 @@ final class Updater: ObservableObject {
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 204 || code == 404 { return nil }
         guard code == 200 else { throw UpdateError("nRF Cloud answered \(code)") }
-        struct Artifact: Decodable { let url: String; let file_size: Int? }
-        struct Body: Decodable { let version: String; let artifacts: [Artifact] }
+        struct Artifact: Decodable { let url: String; let file_size: Int?; let component_version: String? }
+        struct Body: Decodable { let version: String; let artifacts: [Artifact]; let component_version: String? }
         let body = try JSONDecoder().decode(Body.self, from: data)
         guard let a = body.artifacts.first, let url = URL(string: a.url) else { return nil }
-        return Release(version: body.version, url: url, size: a.file_size ?? 0)
+        // The Bluetooth chip is a component of the LTE chip's release, so the
+        // release version is the LTE one. The image's own MCUboot header says
+        // which version it really is; read just its first 32 bytes.
+        let version = try? await imageVersion(url)
+        return Release(version: version ?? a.component_version ?? body.component_version ?? body.version,
+                       url: url, size: a.file_size ?? 0)
+    }
+
+    /// Version from an MCUboot image header (magic 0x96f3b83d, version at byte 20).
+    private func imageVersion(_ url: URL) async throws -> String? {
+        var req = URLRequest(url: url)
+        req.setValue("bytes=0-31", forHTTPHeaderField: "Range")
+        let (data, _) = try await URLSession.shared.data(for: req)
+        let b = [UInt8](data.prefix(32))
+        guard b.count >= 24 else { return nil }
+        let magic = UInt32(b[0]) | UInt32(b[1]) << 8 | UInt32(b[2]) << 16 | UInt32(b[3]) << 24
+        guard magic == 0x96f3_b83d else { return nil }
+        let rev = Int(b[22]) | Int(b[23]) << 8
+        return "\(b[20]).\(b[21]).\(rev)"
     }
 
     // MARK: Start
