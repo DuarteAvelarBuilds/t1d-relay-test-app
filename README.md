@@ -6,6 +6,8 @@ actually arrive and how many were missed.
 
 Not for real use. It's for testing the board, nothing more.
 
+Reviewing the code? Start with [REVIEW.md](REVIEW.md).
+
 Needs relay firmware 0.4.0 or later on both chips
 (`DuarteAvelarBuilds/t1d-relay-firmware`). The Bluetooth service it talks to
 is described in that repo's `docs/ble-test-service.md`.
