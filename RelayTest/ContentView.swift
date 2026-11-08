@@ -110,8 +110,8 @@ struct FirmwareSection: View {
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
             }
-            if updater.checked && updater.outdated.count > 1 {
-                Button("Update all") { updater.updateAll() }
+            if updater.checked && updater.latestLte != nil && updater.latestBt != nil {
+                Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll() }
                     .disabled(updater.busy != nil || updater.updatingAll)
             }
             Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
