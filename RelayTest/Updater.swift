@@ -51,6 +51,14 @@ final class Updater: ObservableObject {
     private var outbox: [(Data, CBCharacteristic)] = []
     private var started = Date()
 
+    /// "Update all": chips still to do, LTE first (the phone stays connected
+    /// while it restarts), the Bluetooth chip last (its restart drops the link).
+    @Published var updatingAll = false
+    private var allQueue: [Chip] = []
+    /// After the LTE chip's update: the version to see before going on.
+    private var waitingForLte: String?
+    private var waitTimer: Timer?
+
     static let projectKey = (Bundle.main.object(forInfoDictionaryKey: "MemfaultProjectKey") as? String) ?? ""
 
     // MARK: Device info
@@ -65,6 +73,49 @@ final class Updater: ObservableObject {
         btVersion = after("relay-bt") ?? "?"
         lteVersion = after("lte") ?? "?"
         serial = after("serial") ?? ""
+        if let want = waitingForLte, lteVersion.hasPrefix(want) {
+            waitingForLte = nil
+            waitTimer?.invalidate()
+            startNextOfAll()
+        }
+    }
+
+    /// Chips whose newest release differs from what they run.
+    var outdated: [Chip] {
+        var chips: [Chip] = []
+        if let l = latestLte, !lteVersion.hasPrefix(l.version) { chips.append(.lte) }
+        if let b = latestBt, !btVersion.hasPrefix(b.version) { chips.append(.bt) }
+        return chips
+    }
+
+    // MARK: Update all
+
+    func updateAll() {
+        guard busy == nil, !updatingAll else { return }
+        allQueue = outdated
+        guard !allQueue.isEmpty else {
+            message = "Both chips already run the newest firmware."
+            return
+        }
+        updatingAll = true
+        startNextOfAll()
+    }
+
+    private func startNextOfAll() {
+        guard updatingAll else { return }
+        guard !allQueue.isEmpty else {
+            updatingAll = false
+            return
+        }
+        start(allQueue.removeFirst())
+    }
+
+    private func stopAll() {
+        updatingAll = false
+        allQueue = []
+        waitingForLte = nil
+        waitTimer?.invalidate()
+        waitTimer = nil
     }
 
     // MARK: nRF Cloud
@@ -167,6 +218,7 @@ final class Updater: ObservableObject {
     }
 
     private func finish(_ text: String) {
+        stopAll()
         outbox.removeAll()
         timer?.invalidate()
         timer = nil
@@ -244,7 +296,10 @@ final class Updater: ObservableObject {
                 p.writeValue(Data([3]), for: c, type: .withResponse)
             }
             busy = nil
-            message = "Bluetooth chip restarting on the new firmware. Connect again in about 30 s; it keeps the update once it's talked to the LTE chip for a minute."
+            message = updatingAll
+                ? "Both chips updated. The Bluetooth chip is restarting now; the app reconnects by itself in about 30 s, and each chip keeps its update after a minute of working."
+                : "Bluetooth chip restarting on the new firmware. The app reconnects by itself in about 30 s; it keeps the update once it's talked to the LTE chip for a minute."
+            stopAll()
         } else {
             smpSend()
         }
@@ -288,6 +343,20 @@ final class Updater: ObservableObject {
             write([0x12])
             busy = nil
             message = "LTE chip restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
+            if updatingAll, !allQueue.isEmpty, let want = latestLte?.version {
+                // The Bluetooth chip goes next, once the LTE chip is back and
+                // reports the new version (the app re-reads it every few seconds).
+                waitingForLte = want
+                message = "LTE chip restarting on \(want). The Bluetooth chip goes next, once the LTE chip is back (about 30 s)…"
+                waitTimer?.invalidate()
+                waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
+                    guard let self, self.waitingForLte != nil else { return }
+                    self.stopAll()
+                    self.message = "The LTE chip didn't come back on \(want) within 3 minutes, so the Bluetooth chip wasn't updated. If it went back to the old version, its update didn't keep; check again and retry."
+                }
+            } else {
+                stopAll()
+            }
         } else {
             lteSendWindow()
         }
