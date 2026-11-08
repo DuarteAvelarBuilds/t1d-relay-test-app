@@ -322,6 +322,10 @@ extension Relay: CBPeripheralDelegate {
         }
     }
 
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        updater.pump()
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         if error == nil { linkRssi = RSSI.intValue }
     }
