@@ -46,6 +46,9 @@ final class Updater: ObservableObject {
     private var tries = 0
     private var timer: Timer?
     private var smpSeq: UInt8 = 0
+    /// Writes waiting for iOS to have room. Writes without response sent while
+    /// canSendWriteWithoutResponse is false can be dropped silently.
+    private var outbox: [(Data, CBCharacteristic)] = []
     private var started = Date()
 
     static let projectKey = (Bundle.main.object(forInfoDictionaryKey: "MemfaultProjectKey") as? String) ?? ""
@@ -164,6 +167,7 @@ final class Updater: ObservableObject {
     }
 
     private func finish(_ text: String) {
+        outbox.removeAll()
         timer?.invalidate()
         timer = nil
         busy = nil
@@ -178,6 +182,7 @@ final class Updater: ObservableObject {
             if self.tries > 3 {
                 self.finish("No answer from the Bluetooth chip, so the update stopped. Nothing was installed. Disconnect, connect again and retry.")
             } else {
+                self.outbox.removeAll() // a retry sends it all again
                 retry()
             }
         }
@@ -215,7 +220,7 @@ final class Updater: ObservableObject {
         var i = packet.startIndex
         while i < packet.endIndex {
             let j = min(i + mtu, packet.endIndex)
-            p.writeValue(packet.subdata(in: i..<j), for: c, type: .withoutResponse)
+            queueWrite(packet.subdata(in: i..<j), c)
             i = j
         }
         arm(5) { [weak self] in self?.smpSend() }
@@ -289,8 +294,23 @@ final class Updater: ObservableObject {
     }
 
     private func write(_ bytes: [UInt8]) {
-        guard let p = peripheral, let c = update else { return }
-        p.writeValue(Data(bytes), for: c, type: .withoutResponse)
+        guard let c = update else { return }
+        queueWrite(Data(bytes), c)
+    }
+
+    private func queueWrite(_ data: Data, _ c: CBCharacteristic) {
+        outbox.append((data, c))
+        pump()
+    }
+
+    /// Sends queued writes while iOS has room; Relay calls this again from
+    /// peripheralIsReady(toSendWriteWithoutResponse:).
+    func pump() {
+        guard let p = peripheral else { outbox.removeAll(); return }
+        while let next = outbox.first, p.canSendWriteWithoutResponse {
+            p.writeValue(next.0, for: next.1, type: .withoutResponse)
+            outbox.removeFirst()
+        }
     }
 
     private func le32(_ v: UInt32) -> [UInt8] {
