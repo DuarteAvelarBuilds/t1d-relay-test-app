@@ -42,6 +42,8 @@ final class Updater: ObservableObject {
 
     private var image = Data()
     private var acked = 0
+    /// Retries since the chip last answered; the update gives up after 3.
+    private var tries = 0
     private var timer: Timer?
     private var smpSeq: UInt8 = 0
     private var started = Date()
@@ -145,6 +147,7 @@ final class Updater: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(from: rel.url)
                 image = data
                 acked = 0
+                tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
                 if chip == .bt { smpSend() } else { lteBegin() }
@@ -169,7 +172,15 @@ final class Updater: ObservableObject {
 
     private func arm(_ seconds: TimeInterval, _ retry: @escaping () -> Void) {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { _ in retry() }
+        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            guard let self, self.busy != nil else { return }
+            self.tries += 1
+            if self.tries > 3 {
+                self.finish("No answer from the Bluetooth chip, so the update stopped. Nothing was installed. Disconnect, connect again and retry.")
+            } else {
+                retry()
+            }
+        }
     }
 
     private func showProgress() {
@@ -199,7 +210,14 @@ final class Updater: ObservableObject {
         // op 2 = write, group 1 = image, id 1 = upload
         var packet = Data([2, 0, UInt8(body.count >> 8), UInt8(body.count & 0xFF), 0, 1, smpSeq, 1])
         packet += body
-        p.writeValue(packet, for: c, type: .withoutResponse)
+        // Reassembly on the chip lets one request span several writes.
+        let mtu = max(p.maximumWriteValueLength(for: .withoutResponse), 20)
+        var i = packet.startIndex
+        while i < packet.endIndex {
+            let j = min(i + mtu, packet.endIndex)
+            p.writeValue(packet.subdata(in: i..<j), for: c, type: .withoutResponse)
+            i = j
+        }
         arm(5) { [weak self] in self?.smpSend() }
     }
 
@@ -212,6 +230,7 @@ final class Updater: ObservableObject {
         }
         guard let off = fields["off"] else { return }
         acked = Int(off)
+        tries = 0
         showProgress()
         if acked >= image.count {
             timer?.invalidate()
@@ -257,6 +276,7 @@ final class Updater: ObservableObject {
         }
         guard b[0] == 0x20 else { return }
         acked = Int(v)
+        tries = 0
         showProgress()
         if acked >= image.count {
             timer?.invalidate()
