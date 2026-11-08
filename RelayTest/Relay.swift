@@ -201,7 +201,7 @@ final class Relay: NSObject, ObservableObject {
         control = nil
         infoChar = nil
         linkRssi = nil
-        updater.connectionLost()
+        updater.connectionLost(userAsked: userDisconnected)
         updater.peripheral = nil
         updater.smp = nil
         updater.update = nil

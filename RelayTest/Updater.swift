@@ -25,6 +25,9 @@ final class Updater: ObservableObject {
     @Published var btVersion = "?"
     @Published var lteVersion = "?"
     @Published var serial = ""
+    /// Seconds since the Bluetooth chip last heard the LTE chip (Bluetooth
+    /// firmware 0.4.6 and later; nil before).
+    @Published var heard: Int?
     @Published var latestBt: Release?
     @Published var latestLte: Release?
     @Published var checked = false
@@ -58,6 +61,11 @@ final class Updater: ObservableObject {
     /// After the LTE chip's update: the version to see before going on.
     private var waitingForLte: String?
     private var waitTimer: Timer?
+    /// After a stall: the chip to update again once the chips can talk again
+    /// (the stuck chip restarts itself, the app reconnects).
+    private var resumeChip: Chip?
+    private var resumeTimer: Timer?
+    private var autoRetries = 0
 
     static let projectKey = (Bundle.main.object(forInfoDictionaryKey: "MemfaultProjectKey") as? String) ?? ""
 
@@ -73,11 +81,30 @@ final class Updater: ObservableObject {
         btVersion = after("relay-bt") ?? "?"
         lteVersion = after("lte") ?? "?"
         serial = after("serial") ?? ""
+        heard = after("heard").flatMap { Int($0) }
+        if let c = resumeChip, busy == nil, linkOK, peripheral != nil,
+           (c == .bt ? smp : update) != nil {
+            resumeChip = nil
+            resumeTimer?.invalidate()
+            begin(c)
+        }
         if let want = waitingForLte, lteVersion.hasPrefix(want) {
             waitingForLte = nil
             waitTimer?.invalidate()
             startNextOfAll()
         }
+    }
+
+    /// The LTE chip's lines are reaching the Bluetooth chip. Unknown counts as
+    /// fine (older Bluetooth firmware doesn't say).
+    var linkOK: Bool { (heard ?? 0) <= 20 }
+
+    /// One line on the link between the chips, for the Firmware section.
+    var linkText: String? {
+        guard let h = heard else { return nil }
+        return h <= 20
+            ? "Chip link OK (Bluetooth chip heard the LTE chip \(h) s ago)"
+            : "The Bluetooth chip hasn't heard the LTE chip for \(h) s. It restarts itself after 45 s, or the LTE chip resets it."
     }
 
     /// Chips whose newest release differs from what they run.
@@ -108,6 +135,9 @@ final class Updater: ObservableObject {
             return
         }
         start(allQueue.removeFirst())
+        if busy == nil && resumeChip == nil {
+            stopAll() // start() couldn't begin and said why in `message`
+        }
     }
 
     private func stopAll() {
@@ -184,7 +214,20 @@ final class Updater: ObservableObject {
 
     // MARK: Start
 
+    /// The Update buttons. The LTE chip's update goes through the Bluetooth
+    /// chip, so it waits for the link between them to be working.
     func start(_ chip: Chip) {
+        guard busy == nil else { return }
+        autoRetries = 0
+        resumeChip = nil
+        if chip == .lte && !linkOK {
+            waitForLink(.lte, "The Bluetooth chip isn't hearing the LTE chip right now.")
+            return
+        }
+        begin(chip)
+    }
+
+    private func begin(_ chip: Chip) {
         guard busy == nil, let rel = chip == .bt ? latestBt : latestLte else { return }
         guard peripheral != nil, (chip == .bt ? smp : update) != nil else {
             message = chip == .bt
@@ -211,14 +254,48 @@ final class Updater: ObservableObject {
         }
     }
 
-    func connectionLost() {
-        if busy != nil {
-            finish("The connection dropped. Nothing changed; connect and try again.")
+    /// From Relay when the Bluetooth connection ends.
+    func connectionLost(userAsked: Bool) {
+        if userAsked {
+            if busy != nil || resumeChip != nil {
+                finish("Stopped: you disconnected. Nothing was installed.")
+            }
+            return
+        }
+        if let chip = busy {
+            retryLater(chip, "The connection dropped.")
+        }
+    }
+
+    /// A transfer stalled: drop it and start it again from the beginning
+    /// once the chips can talk again (at most twice per tap).
+    private func retryLater(_ chip: Chip, _ why: String) {
+        timer?.invalidate()
+        timer = nil
+        outbox.removeAll()
+        busy = nil
+        guard autoRetries < 2 else {
+            finish(why + " It still failed after trying again by itself, so it stopped. Nothing was installed; check the board.")
+            return
+        }
+        autoRetries += 1
+        waitForLink(chip, why)
+    }
+
+    private func waitForLink(_ chip: Chip, _ why: String) {
+        resumeChip = chip
+        message = why + " Waiting for the chips to talk again (up to about a minute), then it starts by itself…"
+        resumeTimer?.invalidate()
+        resumeTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
+            guard let self, self.resumeChip != nil else { return }
+            self.finish("The chips still can't talk to each other after 3 minutes, so the update stopped. Nothing was installed. Check the board (`bt status`).")
         }
     }
 
     private func finish(_ text: String) {
         stopAll()
+        resumeChip = nil
+        resumeTimer?.invalidate()
         outbox.removeAll()
         timer?.invalidate()
         timer = nil
@@ -232,9 +309,11 @@ final class Updater: ObservableObject {
             guard let self, self.busy != nil else { return }
             self.tries += 1
             if self.tries > 3 {
-                self.finish("No answer from the Bluetooth chip, so the update stopped. Nothing was installed. Disconnect, connect again and retry.")
+                let who = self.busy == .lte ? "the LTE chip (through the Bluetooth chip)" : "the Bluetooth chip"
+                self.retryLater(self.busy!, "No answer from \(who).")
             } else {
                 self.outbox.removeAll() // a retry sends it all again
+                self.message = "No answer yet, asking again (\(self.tries) of 3)…"
                 retry()
             }
         }
@@ -311,6 +390,9 @@ final class Updater: ObservableObject {
     private static let piece = 192
 
     private func lteBegin() {
+        if tries == 0 {
+            message = "Asking the LTE chip to get ready (it makes room for the update)…"
+        }
         write([0x10] + le32(UInt32(image.count)))
         arm(3) { [weak self] in self?.lteBegin() }
     }
@@ -342,6 +424,7 @@ final class Updater: ObservableObject {
             timer?.invalidate()
             write([0x12])
             busy = nil
+            autoRetries = 0
             message = "LTE chip restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
             if updatingAll, !allQueue.isEmpty, let want = latestLte?.version {
                 // The Bluetooth chip goes next, once the LTE chip is back and

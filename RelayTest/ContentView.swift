@@ -104,6 +104,9 @@ struct FirmwareSection: View {
             if updater.busy != nil || updater.updatingAll {
                 ProgressView(value: updater.progress)
             }
+            if let link = updater.linkText {
+                Text(link).font(.footnote).foregroundStyle(updater.linkOK ? Color.secondary : Color.orange)
+            }
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
             }
