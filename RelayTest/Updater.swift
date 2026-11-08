@@ -45,6 +45,11 @@ final class Updater: ObservableObject {
 
     private var image = Data()
     private var acked = 0
+    /// LTE chip: where the window now in flight starts. An answer that
+    /// doesn't go past it is a duplicate or stale (the chip answers a
+    /// repeated "get ready" or window again), and acting on it would send
+    /// the same window twice, then four times… which jammed a reinstall.
+    private var windowSentFrom: Int?
     /// Retries since the chip last answered; the update gives up after 3.
     private var tries = 0
     private var timer: Timer?
@@ -251,6 +256,7 @@ final class Updater: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(from: rel.url)
                 image = data
                 acked = 0
+                windowSentFrom = nil
                 tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
@@ -406,6 +412,7 @@ final class Updater: ObservableObject {
 
     private func lteSendWindow() {
         let end = min(acked + Self.window, image.count)
+        windowSentFrom = acked
         var off = acked
         while off < end {
             let n = min(Self.piece, end - off)
@@ -424,6 +431,9 @@ final class Updater: ObservableObject {
             return
         }
         guard b[0] == 0x20 else { return }
+        if let from = windowSentFrom, Int(v) <= from {
+            return // duplicate or stale: the retry timer covers a real loss
+        }
         acked = Int(v)
         tries = 0
         showProgress()
