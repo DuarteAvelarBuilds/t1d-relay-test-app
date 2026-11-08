@@ -323,11 +323,14 @@ enum CBOR {
     static func mapHeader(_ n: Int) -> Data { head(5, UInt64(n)) }
 
     /// The integer values of a top-level map with text keys; other values are skipped.
+    /// Zephyr's mcumgr (zcbor) sends indefinite-length maps (0xBF ... 0xFF).
     static func intMap(_ data: Data) -> [String: Int64] {
         var r = Reader(bytes: [UInt8](data))
         var out: [String: Int64] = [:]
         guard let (major, count) = r.head(), major == 5 else { return out }
-        for _ in 0..<count {
+        var i: UInt64 = 0
+        while count == Reader.indefinite ? !r.atBreak() : i < count {
+            i += 1
             guard let (km, klen) = r.head(), km == 3, let key = r.take(Int(klen)) else { return out }
             let name = String(decoding: key, as: UTF8.self)
             let save = r.pos
@@ -342,6 +345,8 @@ enum CBOR {
     }
 
     struct Reader {
+        /// Length of an indefinite-length item; it ends with a 0xFF break.
+        static let indefinite = UInt64.max
         let bytes: [UInt8]
         var pos = 0
         mutating func head() -> (UInt8, UInt64)? {
@@ -354,8 +359,15 @@ enum CBOR {
                 let n = 1 << Int(info - 24)
                 guard let raw = take(n) else { return nil }
                 return (major, raw.reduce(0) { $0 << 8 | UInt64($1) })
+            case 31 where major >= 2 && major <= 5: return (major, Self.indefinite)
             default: return nil
             }
+        }
+        /// At a 0xFF break: consume it and say so. Also true at the end of the data.
+        mutating func atBreak() -> Bool {
+            guard pos < bytes.count else { return true }
+            if bytes[pos] == 0xFF { pos += 1; return true }
+            return false
         }
         mutating func take(_ n: Int) -> [UInt8]? {
             guard n >= 0, pos + n <= bytes.count else { return nil }
@@ -366,7 +378,16 @@ enum CBOR {
             guard let (major, v) = head() else { return false }
             switch major {
             case 0, 1, 7: return true
+            case 2, 3 where v == Self.indefinite:
+                while !atBreak() { if !skip() { return false } }
+                return true
             case 2, 3: return take(Int(v)) != nil
+            case 4, 5 where v == Self.indefinite:
+                while !atBreak() {
+                    if !skip() { return false }
+                    if major == 5 && !skip() { return false }
+                }
+                return true
             case 4, 5:
                 var i: UInt64 = 0
                 while i < (major == 5 ? v * 2 : v) {
