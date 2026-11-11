@@ -8,7 +8,7 @@
     {"id": 5, "name": "Battery", "kind": "battery", "intervals": [10000, 5000, 1000], "default": 5000},
     {"id": 6, "name": "LTE signal", "kind": "lte", "intervals": [10000, 5000, 2000, 1000], "default": 2000},
     {"id": 7, "name": "G7", "kind": "g7", "intervals": [5000, 2000, 1000], "default": 1000},
-    {"id": 8, "name": "Bluetooth chip", "kind": "btstats", "intervals": [5000, 1000], "default": 1000},
+    {"id": 8, "name": "Controller link", "kind": "controllerstats", "intervals": [5000, 1000], "default": 1000},
     {"id": 20, "name": "Gyro", "kind": "gyro", "intervals": [1000, 200, 100, 50, 20], "default": 100},
     {"id": 23, "name": "IMU accelerometer", "kind": "accel", "intervals": [1000, 200, 100, 50, 20], "default": 100},
     {"id": 21, "name": "Compass", "kind": "compass", "intervals": [1000, 500, 200, 100], "default": 200},
@@ -27,7 +27,7 @@
         {"id": 4, "part": "BH1749 colour sensor"},
         {"id": 5, "part": "ADP5360 fuel gauge and charger"},
         {"id": 6, "part": "Modem RSRP"},
-        {"id": 7, "part": "Pairing status on the Bluetooth chip"},
+        {"id": 7, "part": "Pairing status on the controller"},
         {"id": 8, "part": "Link lines in / bad / dropped, failed sends"}
       ]
     },
@@ -38,7 +38,7 @@
       "updates": {
         "hardwareVersion": "thingy91x",
         "btRollback": false,
-        "note": "A Bluetooth chip update replaces the old firmware (no automatic rollback). If it won't start, recover it over USB."
+        "note": "A controller update replaces the old firmware (no automatic rollback). If it won't start, recover it over USB."
       },
       "sensors": [
         {"id": 1, "part": "ADXL367 accelerometer"},
@@ -49,7 +49,7 @@
         {"id": 23, "part": "BMI270 accelerometer, ±8 g"},
         {"id": 21, "part": "BMM350 magnetometer"},
         {"id": 6, "part": "Modem RSRP"},
-        {"id": 7, "part": "Pairing status on the Bluetooth chip"},
+        {"id": 7, "part": "Pairing status on the controller"},
         {"id": 8, "part": "Link lines in / bad / dropped, failed sends"}
       ]
     }

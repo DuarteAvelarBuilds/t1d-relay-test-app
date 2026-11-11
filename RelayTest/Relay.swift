@@ -23,7 +23,7 @@ final class Relay: NSObject, ObservableObject {
     static let controlUUID = CBUUID(string: "42800003-C846-48AD-9A69-38EF49048320")
     static let infoUUID = CBUUID(string: "42800004-C846-48AD-9A69-38EF49048320")
     static let updateUUID = CBUUID(string: "42800005-C846-48AD-9A69-38EF49048320")
-    /// mcumgr (SMP) over Bluetooth, for updating the Bluetooth chip itself.
+    /// mcumgr (SMP) over Bluetooth, for updating the controller itself.
     static let smpServiceUUID = CBUUID(string: "8D53DC1D-1DB7-4CD3-868B-8A527460AA84")
     static let smpUUID = CBUUID(string: "DA2E7828-FBCE-4E01-AE9E-261174997C48")
 
@@ -198,7 +198,7 @@ final class Relay: NSObject, ObservableObject {
             }
         }
         peripheral?.readRSSI()
-        // The LTE chip's version and serial reach the Info text a little
+        // The application chip's version and serial reach the Info text a little
         // after connecting, so read it again now and then.
         ticks += 1
         if ticks % 20 == 0, let p = peripheral, let c = infoChar {

@@ -32,7 +32,7 @@ struct BoardDef: Decodable {
         /// nRF Cloud (Memfault) hardware version to fetch releases for, so a
         /// board is only ever offered its own images.
         let hardwareVersion: String
-        /// True when a bad Bluetooth chip image rolls back by itself.
+        /// True when a bad controller image rolls back by itself.
         let btRollback: Bool
         /// Shown under the firmware buttons.
         let note: String?
@@ -111,12 +111,18 @@ enum Sensors {
             return String(format: "x %+.0f  y %+.0f  z %+.0f °/s",
                           Double(v[0]) / 1000, Double(v[1]) / 1000, Double(v[2]) / 1000)
         case "compass":
+            // Heading assumes the board lies flat; Earth's field is 25-65 µT,
+            // so a much bigger number means a magnet nearby (or a bad reading).
             guard v.count >= 3 else { return "?" }
-            let x = Double(v[0]) / 1000, y = Double(v[1]) / 1000
+            let x = Double(v[0]) / 1000, y = Double(v[1]) / 1000, z = Double(v[2]) / 1000
             var heading = atan2(y, x) * 180 / .pi
             if heading < 0 { heading += 360 }
-            return String(format: "x %+.1f  y %+.1f  z %+.1f µT · %.0f°",
-                          x, y, Double(v[2]) / 1000, heading)
+            let points = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+            let point = points[Int((heading + 22.5) / 45) % 8]
+            let field = (x * x + y * y + z * z).squareRoot()
+            let strength = field > 100 ? " (strong: magnet nearby?)" : ""
+            return String(format: "Heading %.0f° %@ · field %.0f µT%@\nx %+.0f  y %+.0f  z %+.0f µT",
+                          heading, point, field, strength, x, y, z)
         case "environment":
             guard v.count >= 4 else { return "?" }
             return String(format: "%.1f °C · %.0f%% RH · %.1f hPa · %.1f kΩ",
@@ -148,7 +154,7 @@ enum Sensors {
             let state = Int(v[0]) < g7States.count ? g7States[Int(v[0])] : "?"
             let rssi = v[1] == 0 ? "" : " · \(v[1]) dBm"
             return "\(state)\(rssi) · \(v[2]) close · \(v[3]) heard"
-        case "btstats":
+        case "controllerstats":
             guard v.count >= 4 else { return "?" }
             return "in \(v[0]) · bad \(v[1]) · dropped \(v[2]) · failed \(v[3])"
         default:
@@ -159,7 +165,14 @@ enum Sensors {
 
     static func graph(_ kind: String) -> (([Int32]) -> Double)? {
         switch kind {
-        case "accel", "gyro", "compass": return { v in magnitude(v) }
+        case "accel", "gyro": return { v in magnitude(v) }
+        case "compass":
+            // Graph the heading, so turning the board shows as a line moving.
+            return { v in
+                guard v.count >= 2 else { return 0 }
+                let h = atan2(Double(v[1]), Double(v[0])) * 180 / .pi
+                return h < 0 ? h + 360 : h
+            }
         case "environment": return { v in Double(v[0]) / 1000 }
         case "rgbir": return { v in Double(v[1]) }
         case "lte": return { v in Double(v[0]) }
