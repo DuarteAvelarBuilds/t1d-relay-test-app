@@ -56,9 +56,9 @@ struct DeviceList: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(f.name)
-                                // The 91 X advertises as "T1D relay X" (firmware 0.5.0 on).
-                                Text(f.name.hasSuffix(" X") ? "Thingy:91 X" : "Thingy:91")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                if let b = Boards.fromAdvertisedName(f.name) {
+                                    Text(b.name).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             Text("\(f.rssi) dBm").foregroundStyle(.secondary).monospacedDigit()
@@ -76,7 +76,7 @@ struct SensorList: View {
     var body: some View {
         List {
             Section {
-                Text(relay.updater.isThingy91X ? "Thingy:91 X" : "Thingy:91").font(.headline)
+                Text(relay.updater.boardDef.name).font(.headline)
                 HStack {
                     Text(relay.info.isEmpty ? "Connected" : relay.info)
                     Spacer()
@@ -116,8 +116,8 @@ struct FirmwareSection: View {
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
             }
-            if updater.isThingy91X {
-                Text("Thingy:91 X: a Bluetooth chip update replaces the old firmware (no automatic rollback). If it won't start, recover it over USB.")
+            if let note = updater.boardDef.updates.note {
+                Text("\(updater.boardDef.name): \(note)")
                     .font(.footnote).foregroundStyle(.orange)
             }
             if updater.checked && updater.latestLte != nil && updater.latestBt != nil {

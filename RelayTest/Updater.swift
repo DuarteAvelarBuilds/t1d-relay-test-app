@@ -32,8 +32,9 @@ final class Updater: ObservableObject {
     /// "thingy91" or "thingy91x" (from Bluetooth firmware 0.5.0; "" before,
     /// which is always a Thingy:91).
     @Published var board = ""
-    var hardwareVersion: String { board.isEmpty ? Sensors.thingy91 : board }
-    var isThingy91X: Bool { board == Sensors.thingy91x }
+    /// This relay's device definition (Boards.json).
+    var boardDef: BoardDef { Boards.find(board) }
+    var hardwareVersion: String { boardDef.updates.hardwareVersion }
     /// Seconds since the Bluetooth chip last heard the LTE chip (Bluetooth
     /// firmware 0.4.6 and later; nil before).
     @Published var heard: Int?

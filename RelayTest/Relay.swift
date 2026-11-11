@@ -40,7 +40,7 @@ final class Relay: NSObject, ObservableObject {
 
     @Published var status: Status = .bluetoothOff
     @Published var found: [Found] = []
-    @Published var rows: [SensorRow] = Sensors.all.map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
+    @Published var rows: [SensorRow] = Sensors.forBoard("").map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
     @Published var info = ""
     @Published var linkRssi: Int?
     let updater = Updater()

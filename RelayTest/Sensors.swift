@@ -1,151 +1,175 @@
 import Foundation
 
-/// The relay's sensors, as numbered in the firmware
-/// (t1d-relay-firmware: shared/link/sensors.hpp and docs/ble-test-service.md).
-/// Add a sensor in both places. Numbers 20 and up are the Thingy:91 X's own.
+/// What the app knows about each board and each sensor, loaded from
+/// Boards.json (the device definitions). The screens are built from it: a new
+/// board is a new entry there, not new code. Code here only knows how to show
+/// each *kind* of reading (an x/y/z, a battery, ...).
+///
+/// Sensor numbers match t1d-relay-firmware shared/link/sensors.hpp and
+/// docs/ble-test-service.md. Numbers are never reused.
 struct SensorDef: Identifiable {
     let id: UInt8
     let name: String
-    let detail: String
+    let kind: String
     /// Intervals the picker offers, in ms. All are inside what the board can do.
     let intervals: [Int]
     let defaultInterval: Int
-    /// Turns the raw values into one line of text.
-    let format: ([Int32]) -> String
-    /// One number to draw in the little graph, so you can see it react.
-    let graphValue: (([Int32]) -> Double)?
-    /// Boards that have it ("thingy91", "thingy91x"); nil = every board.
-    var boards: Set<String>? = nil
-    /// The part's name on the Thingy:91 X, where it differs.
-    var detailX: String? = nil
+    /// The part on each board that has it (board id -> part).
+    var parts: [String: String] = [:]
 
     func detail(on board: String) -> String {
-        board == Sensors.thingy91x ? (detailX ?? detail) : detail
+        parts[Boards.find(board).id] ?? ""
+    }
+
+    /// Turns the raw values into one line of text.
+    func format(_ v: [Int32]) -> String { Sensors.format(kind, v) }
+    /// One number to draw in the little graph, so you can see it react.
+    var graphValue: (([Int32]) -> Double)? { Sensors.graph(kind) }
+}
+
+struct BoardDef: Decodable {
+    struct Updates: Decodable {
+        /// nRF Cloud (Memfault) hardware version to fetch releases for, so a
+        /// board is only ever offered its own images.
+        let hardwareVersion: String
+        /// True when a bad Bluetooth chip image rolls back by itself.
+        let btRollback: Bool
+        /// Shown under the firmware buttons.
+        let note: String?
+    }
+    struct Part: Decodable { let id: UInt8; let part: String }
+    let id: String
+    let name: String
+    let advertisedName: String
+    let updates: Updates
+    let sensors: [Part]
+}
+
+enum Boards {
+    private struct File: Decodable {
+        struct Sensor: Decodable {
+            let id: UInt8
+            let name: String
+            let kind: String
+            let intervals: [Int]
+            let `default`: Int
+        }
+        let sensors: [Sensor]
+        let boards: [BoardDef]
+    }
+
+    private static let file: File = {
+        guard let url = Bundle.main.url(forResource: "Boards", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let f = try? JSONDecoder().decode(File.self, from: data),
+              !f.boards.isEmpty else {
+            fatalError("Boards.json is missing or broken")
+        }
+        return f
+    }()
+
+    static var all: [BoardDef] { file.boards }
+
+    /// The board a relay says it is ("board" in its Info). Firmware before
+    /// 0.5.0 doesn't say; those are all Thingy:91s (the first entry).
+    static func find(_ id: String) -> BoardDef {
+        all.first { $0.id == id } ?? all[0]
+    }
+
+    /// The board a relay is, from its advertised name, before connecting.
+    static func fromAdvertisedName(_ name: String) -> BoardDef? {
+        all.sorted { $0.advertisedName.count > $1.advertisedName.count }
+            .first { name.hasPrefix($0.advertisedName) }
+    }
+
+    static let sensors: [SensorDef] = file.sensors.map { s in
+        var def = SensorDef(id: s.id, name: s.name, kind: s.kind, intervals: s.intervals,
+                            defaultInterval: s.default)
+        for b in file.boards {
+            if let p = b.sensors.first(where: { $0.id == s.id }) { def.parts[b.id] = p.part }
+        }
+        return def
     }
 }
 
 enum Sensors {
-    static let thingy91 = "thingy91"
-    static let thingy91x = "thingy91x"
-
-    /// The sensors a board has. Firmware before 0.5.0 doesn't say its board;
-    /// those are all Thingy:91s.
-    static func forBoard(_ board: String) -> [SensorDef] {
-        let b = board.isEmpty ? thingy91 : board
-        return all.filter { $0.boards?.contains(b) ?? true }
-    }
-
     static let g7States = ["idle", "looking", "one close", "too many", "selected", "lost"]
 
-    static let all: [SensorDef] = [
-        SensorDef(id: 1, name: "Motion", detail: "ADXL362 accelerometer, ±8 g",
-                  intervals: [1000, 200, 100, 50, 20, 10], defaultInterval: 100,
-                  format: { v in Sensors.xyz(v) },
-                  graphValue: { v in Sensors.magnitude(v) },
-                  detailX: "ADXL367 accelerometer"),
-        SensorDef(id: 2, name: "Impact", detail: "ADXL372, ±200 g, biggest hit since last reading",
-                  intervals: [1000, 200, 100, 50, 20, 10], defaultInterval: 100,
-                  format: { v in Sensors.xyz(v) },
-                  graphValue: { v in Sensors.magnitude(v) },
-                  boards: [Sensors.thingy91]),
-        SensorDef(id: 3, name: "Environment", detail: "BME680",
-                  intervals: [5000, 2000, 1000, 500, 200], defaultInterval: 1000,
-                  format: { v in
-                      guard v.count >= 4 else { return "?" }
-                      return String(format: "%.1f °C · %.0f%% RH · %.1f hPa · %.1f kΩ",
-                                    Double(v[0]) / 1000, Double(v[1]) / 1000,
-                                    Double(v[2]) / 100, Double(v[3]) / 1000)
-                  },
-                  graphValue: { v in Double(v[0]) / 1000 },
-                  detailX: "BME688"),
-        SensorDef(id: 4, name: "Light", detail: "BH1749 colour sensor",
-                  intervals: [2000, 1000, 500, 250, 125], defaultInterval: 500,
-                  format: { v in
-                      guard v.count >= 4 else { return "?" }
-                      return "R \(v[0])  G \(v[1])  B \(v[2])  IR \(v[3])"
-                  },
-                  graphValue: { v in Double(v[1]) },
-                  boards: [Sensors.thingy91]),
-        SensorDef(id: 5, name: "Battery", detail: "ADP5360 fuel gauge and charger",
-                  intervals: [10000, 5000, 1000], defaultInterval: 5000,
-                  format: { v in
-                      guard v.count >= 2 else { return "?" }
-                      let base = String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
-                      guard v.count >= 3 else { return base }
-                      var text = base + " · " + Sensors.charger(v[2])
-                      if v.count >= 4 && v[3] >= 0 {
-                          text += String(format: " (0x%02X)", v[3])
-                      }
-                      return text
-                  },
-                  graphValue: nil,
-                  detailX: "nPM1300 charger + nRF Fuel Gauge"),
-        SensorDef(id: 6, name: "LTE signal", detail: "Modem RSRP",
-                  intervals: [10000, 5000, 2000, 1000], defaultInterval: 2000,
-                  format: { v in v.first.map { $0 == 0 ? "no signal" : "\($0) dBm" } ?? "?" },
-                  graphValue: { v in Double(v[0]) }),
-        SensorDef(id: 7, name: "G7", detail: "Pairing status on the Bluetooth chip",
-                  intervals: [5000, 2000, 1000], defaultInterval: 1000,
-                  format: { v in
-                      guard v.count >= 4 else { return "?" }
-                      let state = Int(v[0]) < Sensors.g7States.count ? Sensors.g7States[Int(v[0])] : "?"
-                      let rssi = v[1] == 0 ? "" : " · \(v[1]) dBm"
-                      return "\(state)\(rssi) · \(v[2]) close · \(v[3]) heard"
-                  },
-                  graphValue: nil),
-        SensorDef(id: 8, name: "Bluetooth chip", detail: "Link lines in / bad / dropped, failed sends",
-                  intervals: [5000, 1000], defaultInterval: 1000,
-                  format: { v in
-                      guard v.count >= 4 else { return "?" }
-                      return "in \(v[0]) · bad \(v[1]) · dropped \(v[2]) · failed \(v[3])"
-                  },
-                  graphValue: nil),
-        // Thingy:91 X only.
-        SensorDef(id: 20, name: "Gyro", detail: "BMI270 gyroscope, ±2000 °/s",
-                  intervals: [1000, 200, 100, 50, 20], defaultInterval: 100,
-                  format: { v in
-                      guard v.count >= 3 else { return "?" }
-                      return String(format: "x %+.0f  y %+.0f  z %+.0f °/s",
-                                    Double(v[0]) / 1000, Double(v[1]) / 1000, Double(v[2]) / 1000)
-                  },
-                  graphValue: { v in Sensors.magnitude(v) },
-                  boards: [Sensors.thingy91x]),
-        SensorDef(id: 23, name: "IMU accelerometer", detail: "BMI270 accelerometer, ±8 g",
-                  intervals: [1000, 200, 100, 50, 20], defaultInterval: 100,
-                  format: { v in Sensors.xyz(v) },
-                  graphValue: { v in Sensors.magnitude(v) },
-                  boards: [Sensors.thingy91x]),
-        SensorDef(id: 21, name: "Compass", detail: "BMM350 magnetometer",
-                  intervals: [1000, 500, 200, 100], defaultInterval: 200,
-                  format: { v in
-                      guard v.count >= 3 else { return "?" }
-                      let x = Double(v[0]) / 1000, y = Double(v[1]) / 1000
-                      var heading = atan2(y, x) * 180 / .pi
-                      if heading < 0 { heading += 360 }
-                      return String(format: "x %+.1f  y %+.1f  z %+.1f µT · %.0f°",
-                                    x, y, Double(v[2]) / 1000, heading)
-                  },
-                  graphValue: { v in Sensors.magnitude(v) },
-                  boards: [Sensors.thingy91x]),
-        SensorDef(id: 22, name: "Fuel gauge", detail: "nPM1300 + nRF Fuel Gauge details",
-                  intervals: [10000, 5000], defaultInterval: 5000,
-                  format: { v in
-                      guard v.count >= 4 else { return "?" }
-                      var text = String(format: "%+.1f mA · %.1f °C", Double(v[0]) / 1000,
-                                        Double(v[1]) / 1000)
-                      if v[2] >= 0 { text += " · empty in " + Sensors.duration(v[2]) }
-                      if v[3] >= 0 { text += " · full in " + Sensors.duration(v[3]) }
-                      return text
-                  },
-                  graphValue: { v in Double(v[0]) / 1000 },
-                  boards: [Sensors.thingy91x]),
-    ]
+    static var all: [SensorDef] { Boards.sensors }
 
-    static func duration(_ s: Int32) -> String {
-        s >= 3600 ? String(format: "%d h %02d min", s / 3600, (s % 3600) / 60) : "\(s / 60) min"
+    /// The sensors a board has, in the order its definition lists them.
+    static func forBoard(_ board: String) -> [SensorDef] {
+        Boards.find(board).sensors.compactMap { p in all.first { $0.id == p.id } }
     }
 
-    /// ADP5360 charger status (firmware 0.4.2 and later).
+    static func format(_ kind: String, _ v: [Int32]) -> String {
+        switch kind {
+        case "accel":
+            return xyz(v)
+        case "gyro":
+            guard v.count >= 3 else { return "?" }
+            return String(format: "x %+.0f  y %+.0f  z %+.0f °/s",
+                          Double(v[0]) / 1000, Double(v[1]) / 1000, Double(v[2]) / 1000)
+        case "compass":
+            guard v.count >= 3 else { return "?" }
+            let x = Double(v[0]) / 1000, y = Double(v[1]) / 1000
+            var heading = atan2(y, x) * 180 / .pi
+            if heading < 0 { heading += 360 }
+            return String(format: "x %+.1f  y %+.1f  z %+.1f µT · %.0f°",
+                          x, y, Double(v[2]) / 1000, heading)
+        case "environment":
+            guard v.count >= 4 else { return "?" }
+            return String(format: "%.1f °C · %.0f%% RH · %.1f hPa · %.1f kΩ",
+                          Double(v[0]) / 1000, Double(v[1]) / 1000,
+                          Double(v[2]) / 100, Double(v[3]) / 1000)
+        case "rgbir":
+            guard v.count >= 4 else { return "?" }
+            return "R \(v[0])  G \(v[1])  B \(v[2])  IR \(v[3])"
+        case "battery":
+            guard v.count >= 2 else { return "?" }
+            let base = String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
+            guard v.count >= 3 else { return base }
+            var text = base + " · " + charger(v[2])
+            if v.count >= 4 && v[3] >= 0 {
+                text += String(format: " (0x%02X)", v[3])
+            }
+            return text
+        case "fuelgauge":
+            guard v.count >= 4 else { return "?" }
+            var text = String(format: "%+.1f mA · %.1f °C",
+                              Double(v[0]) / 1000, Double(v[1]) / 1000)
+            if v[2] >= 0 { text += " · empty in " + duration(v[2]) }
+            if v[3] >= 0 { text += " · full in " + duration(v[3]) }
+            return text
+        case "lte":
+            return v.first.map { $0 == 0 ? "no signal" : "\($0) dBm" } ?? "?"
+        case "g7":
+            guard v.count >= 4 else { return "?" }
+            let state = Int(v[0]) < g7States.count ? g7States[Int(v[0])] : "?"
+            let rssi = v[1] == 0 ? "" : " · \(v[1]) dBm"
+            return "\(state)\(rssi) · \(v[2]) close · \(v[3]) heard"
+        case "btstats":
+            guard v.count >= 4 else { return "?" }
+            return "in \(v[0]) · bad \(v[1]) · dropped \(v[2]) · failed \(v[3])"
+        default:
+            // A kind this app version doesn't know yet: show the raw numbers.
+            return v.map(String.init).joined(separator: " ")
+        }
+    }
+
+    static func graph(_ kind: String) -> (([Int32]) -> Double)? {
+        switch kind {
+        case "accel", "gyro", "compass": return { v in magnitude(v) }
+        case "environment": return { v in Double(v[0]) / 1000 }
+        case "rgbir": return { v in Double(v[1]) }
+        case "lte": return { v in Double(v[0]) }
+        case "fuelgauge": return { v in Double(v[0]) / 1000 }
+        default: return nil
+        }
+    }
+
+    /// Charger state, in the firmware's numbering (ADP5360's, also used for the
+    /// nPM1300 on the Thingy:91 X).
     static func charger(_ state: Int32) -> String {
         switch state {
         case 0: return "on battery"
@@ -156,6 +180,10 @@ enum Sensors {
         case 7: return "plugged in, checking battery"
         default: return "charger ?"
         }
+    }
+
+    static func duration(_ s: Int32) -> String {
+        s >= 3600 ? String(format: "%d h %02d min", s / 3600, (s % 3600) / 60) : "\(s / 60) min"
     }
 
     static func xyz(_ v: [Int32]) -> String {
