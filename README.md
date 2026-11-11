@@ -23,8 +23,8 @@ is described in that repo's `docs/ble-test-service.md`.
   only offers rates the board can handle.
 - The screen stays on while connected.
 - **Firmware**: what each chip runs, the newest release on nRF Cloud
-  (Check for updates), and an Update button per chip. The Bluetooth chip
-  takes about a minute and a half, the LTE chip about a minute. Each chip
+  (Check for updates), and an Update button per chip. The controller
+  takes about a minute and a half, the application chip about a minute. Each chip
   boots the new firmware on trial and goes back to the old one unless it
   works, so an interrupted update is harmless.
 
@@ -37,7 +37,7 @@ is described in that repo's `docs/ble-test-service.md`.
 | Battery | every 5 s | 1/s |
 | LTE signal | every 2 s | 1/s |
 | G7 pairing status | 1/s | 1/s |
-| Bluetooth chip counters | 1/s | 1/s |
+| Controller counters | 1/s | 1/s |
 
 All sensors share a wire between the board's two chips that carries about
 250 readings a second in total.
