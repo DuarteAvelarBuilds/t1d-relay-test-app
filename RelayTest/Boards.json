@@ -1,0 +1,57 @@
+{
+  "_about": "Device definitions for Relay Test. Sensor numbers match t1d-relay-firmware shared/link/sensors.hpp and docs/ble-test-service.md; numbers are never reused. A new board is a new entry in 'boards'. A new sensor needs an entry in 'sensors', and a new 'kind' only if its numbers have a shape the app can't show yet (Sensors.swift).",
+  "sensors": [
+    {"id": 1, "name": "Motion", "kind": "accel", "intervals": [1000, 200, 100, 50, 20, 10], "default": 100},
+    {"id": 2, "name": "Impact", "kind": "accel", "intervals": [1000, 200, 100, 50, 20, 10], "default": 100},
+    {"id": 3, "name": "Environment", "kind": "environment", "intervals": [5000, 2000, 1000, 500, 200], "default": 1000},
+    {"id": 4, "name": "Light", "kind": "rgbir", "intervals": [2000, 1000, 500, 250, 125], "default": 500},
+    {"id": 5, "name": "Battery", "kind": "battery", "intervals": [10000, 5000, 1000], "default": 5000},
+    {"id": 6, "name": "LTE signal", "kind": "lte", "intervals": [10000, 5000, 2000, 1000], "default": 2000},
+    {"id": 7, "name": "G7", "kind": "g7", "intervals": [5000, 2000, 1000], "default": 1000},
+    {"id": 8, "name": "Bluetooth chip", "kind": "btstats", "intervals": [5000, 1000], "default": 1000},
+    {"id": 20, "name": "Gyro", "kind": "gyro", "intervals": [1000, 200, 100, 50, 20], "default": 100},
+    {"id": 23, "name": "IMU accelerometer", "kind": "accel", "intervals": [1000, 200, 100, 50, 20], "default": 100},
+    {"id": 21, "name": "Compass", "kind": "compass", "intervals": [1000, 500, 200, 100], "default": 200},
+    {"id": 22, "name": "Fuel gauge", "kind": "fuelgauge", "intervals": [10000, 5000], "default": 5000}
+  ],
+  "boards": [
+    {
+      "id": "thingy91",
+      "name": "Thingy:91",
+      "advertisedName": "T1D relay",
+      "updates": {"hardwareVersion": "thingy91", "btRollback": true},
+      "sensors": [
+        {"id": 1, "part": "ADXL362 accelerometer, ±8 g"},
+        {"id": 2, "part": "ADXL372, ±200 g, biggest hit since last reading"},
+        {"id": 3, "part": "BME680"},
+        {"id": 4, "part": "BH1749 colour sensor"},
+        {"id": 5, "part": "ADP5360 fuel gauge and charger"},
+        {"id": 6, "part": "Modem RSRP"},
+        {"id": 7, "part": "Pairing status on the Bluetooth chip"},
+        {"id": 8, "part": "Link lines in / bad / dropped, failed sends"}
+      ]
+    },
+    {
+      "id": "thingy91x",
+      "name": "Thingy:91 X",
+      "advertisedName": "T1D relay X",
+      "updates": {
+        "hardwareVersion": "thingy91x",
+        "btRollback": false,
+        "note": "A Bluetooth chip update replaces the old firmware (no automatic rollback). If it won't start, recover it over USB."
+      },
+      "sensors": [
+        {"id": 1, "part": "ADXL367 accelerometer"},
+        {"id": 3, "part": "BME688"},
+        {"id": 5, "part": "nPM1300 charger + nRF Fuel Gauge"},
+        {"id": 22, "part": "nPM1300 current, temperature, time to empty / full"},
+        {"id": 20, "part": "BMI270 gyroscope, ±2000 °/s"},
+        {"id": 23, "part": "BMI270 accelerometer, ±8 g"},
+        {"id": 21, "part": "BMM350 magnetometer"},
+        {"id": 6, "part": "Modem RSRP"},
+        {"id": 7, "part": "Pairing status on the Bluetooth chip"},
+        {"id": 8, "part": "Link lines in / bad / dropped, failed sends"}
+      ]
+    }
+  ]
+}

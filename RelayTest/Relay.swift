@@ -40,7 +40,7 @@ final class Relay: NSObject, ObservableObject {
 
     @Published var status: Status = .bluetoothOff
     @Published var found: [Found] = []
-    @Published var rows: [SensorRow] = Sensors.all.map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
+    @Published var rows: [SensorRow] = Sensors.forBoard("").map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
     @Published var info = ""
     @Published var linkRssi: Int?
     let updater = Updater()
@@ -129,6 +129,18 @@ final class Relay: NSObject, ObservableObject {
         guard let p = peripheral, let c = control else { return }
         let v = UInt16(clamping: ms)
         p.writeValue(Data([1, id, UInt8(v & 0xFF), UInt8(v >> 8)]), for: c, type: .withResponse)
+    }
+
+    /// Show (and stream) only the sensors this board has.
+    private func setBoard(_ board: String) {
+        let defs = Sensors.forBoard(board)
+        let old = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        rows = defs.map { old[$0.id] ?? SensorRow(id: $0.id, interval: $0.defaultInterval) }
+        if status == .connected {
+            for row in rows where row.enabled && old[row.id] == nil {
+                sendRate(row.id, row.interval)
+            }
+        }
     }
 
     private func startAll() {
@@ -312,7 +324,11 @@ extension Relay: CBPeripheralDelegate {
             if let r = Reading(data) { handle(r) }
         case Self.infoUUID:
             info = String(decoding: data, as: UTF8.self)
+            let oldBoard = updater.board
             updater.parseInfo(info)
+            if updater.board != oldBoard || rows.map(\.id) != Sensors.forBoard(updater.board).map(\.id) {
+                setBoard(updater.board)
+            }
         case Self.updateUUID:
             updater.updateNotification(data)
         case Self.smpUUID:

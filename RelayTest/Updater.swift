@@ -4,15 +4,19 @@ import Foundation
 /// Firmware updates from the phone (t1d-relay-firmware docs/ble-test-service.md).
 ///
 /// - Release files come from nRF Cloud (Memfault): software type "bt" for the
-///   Bluetooth chip, "app" for the LTE chip, hardware version "thingy91".
+///   Bluetooth chip, "app" for the LTE chip, hardware version = the board the
+///   relay says it is ("thingy91" or "thingy91x"), so a board is only ever
+///   offered its own images.
 /// - Bluetooth chip: mcumgr (SMP) image upload over Bluetooth, then control
 ///   op 03 boots it on trial.
 /// - LTE chip: no Bluetooth of its own, so the image goes to the Bluetooth
 ///   chip's LTE-update characteristic, which passes it over the wires, in
 ///   768-byte windows that the LTE chip acknowledges.
 ///
-/// Both chips boot a new image on trial and roll back unless it confirms
-/// itself, so a failed or interrupted update leaves the old firmware running.
+/// On the Thingy:91 both chips boot a new image on trial and roll back unless
+/// it confirms itself, so a failed or interrupted update leaves the old
+/// firmware running. The Thingy:91 X's Bluetooth chip (nRF5340) overwrites
+/// its old image instead: no rollback, button recovery if a build is bad.
 final class Updater: ObservableObject {
     enum Chip: String { case bt = "Bluetooth chip", lte = "LTE chip" }
 
@@ -25,6 +29,12 @@ final class Updater: ObservableObject {
     @Published var btVersion = "?"
     @Published var lteVersion = "?"
     @Published var serial = ""
+    /// "thingy91" or "thingy91x" (from Bluetooth firmware 0.5.0; "" before,
+    /// which is always a Thingy:91).
+    @Published var board = ""
+    /// This relay's device definition (Boards.json).
+    var boardDef: BoardDef { Boards.find(board) }
+    var hardwareVersion: String { boardDef.updates.hardwareVersion }
     /// Seconds since the Bluetooth chip last heard the LTE chip (Bluetooth
     /// firmware 0.4.6 and later; nil before).
     @Published var heard: Int?
@@ -89,7 +99,16 @@ final class Updater: ObservableObject {
         }
         btVersion = after("relay-bt") ?? "?"
         lteVersion = after("lte") ?? "?"
-        serial = after("serial") ?? ""
+        let newSerial = after("serial") ?? ""
+        let newBoard = after("board") ?? ""
+        if (!newSerial.isEmpty && !serial.isEmpty && newSerial != serial) || newBoard != board {
+            // A different relay: what was found for the last one doesn't apply.
+            latestBt = nil
+            latestLte = nil
+            checked = false
+        }
+        board = newBoard
+        serial = newSerial
         heard = after("heard").flatMap { Int($0) }
         if let c = resumeChip, busy == nil, linkOK, peripheral != nil,
            (c == .bt ? smp : update) != nil {
@@ -188,7 +207,7 @@ final class Updater: ObservableObject {
         var c = URLComponents(string: "https://device.memfault.com/api/v0/releases/latest")!
         c.queryItems = [
             URLQueryItem(name: "device_serial", value: serial),
-            URLQueryItem(name: "hardware_version", value: "thingy91"),
+            URLQueryItem(name: "hardware_version", value: hardwareVersion),
             URLQueryItem(name: "software_type", value: type),
             // Ask as if from 0.0.0 so the newest release always comes back.
             URLQueryItem(name: "current_version", value: "0.0.0"),
@@ -571,11 +590,11 @@ enum CBOR {
             guard let (major, v) = head() else { return false }
             switch major {
             case 0, 1, 7: return true
-            case 2, 3 where v == Self.indefinite:
+            case 2 where v == Self.indefinite, 3 where v == Self.indefinite:
                 while !atBreak() { if !skip() { return false } }
                 return true
             case 2, 3: return take(Int(v)) != nil
-            case 4, 5 where v == Self.indefinite:
+            case 4 where v == Self.indefinite, 5 where v == Self.indefinite:
                 while !atBreak() {
                     if !skip() { return false }
                     if major == 5 && !skip() { return false }

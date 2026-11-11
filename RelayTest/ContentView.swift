@@ -54,7 +54,12 @@ struct DeviceList: View {
                         relay.connect(f)
                     } label: {
                         HStack {
-                            Text(f.name)
+                            VStack(alignment: .leading) {
+                                Text(f.name)
+                                if let b = Boards.fromAdvertisedName(f.name) {
+                                    Text(b.name).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                             Spacer()
                             Text("\(f.rssi) dBm").foregroundStyle(.secondary).monospacedDigit()
                         }
@@ -71,6 +76,7 @@ struct SensorList: View {
     var body: some View {
         List {
             Section {
+                Text(relay.updater.boardDef.name).font(.headline)
                 HStack {
                     Text(relay.info.isEmpty ? "Connected" : relay.info)
                     Spacer()
@@ -109,6 +115,10 @@ struct FirmwareSection: View {
             }
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
+            }
+            if let note = updater.boardDef.updates.note {
+                Text("\(updater.boardDef.name): \(note)")
+                    .font(.footnote).foregroundStyle(.orange)
             }
             if updater.checked && updater.latestLte != nil && updater.latestBt != nil {
                 Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll() }
@@ -176,7 +186,7 @@ struct SensorCell: View {
                 .font(.caption)
                 .monospacedDigit()
             }
-            Text(def.detail).font(.caption2).foregroundStyle(.secondary)
+            Text(def.detail(on: relay.updater.board)).font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
     }
