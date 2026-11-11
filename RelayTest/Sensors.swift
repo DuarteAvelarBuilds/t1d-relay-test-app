@@ -32,7 +32,7 @@ struct BoardDef: Decodable {
         /// nRF Cloud (Memfault) hardware version to fetch releases for, so a
         /// board is only ever offered its own images.
         let hardwareVersion: String
-        /// True when a bad Bluetooth chip image rolls back by itself.
+        /// True when a bad controller image rolls back by itself.
         let btRollback: Bool
         /// Shown under the firmware buttons.
         let note: String?

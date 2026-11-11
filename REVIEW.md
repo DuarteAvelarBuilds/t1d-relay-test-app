@@ -33,7 +33,7 @@ T1D relay hardware works. It:
 
 - finds the relay over Bluetooth LE and connects (no pairing);
 - shows every board sensor live (motion, impact, environment, light,
-  battery and charger, LTE signal, G7 selection status, Bluetooth chip
+  battery and charger, LTE signal, G7 selection status, controller
   counters), with the rate asked for, the rate actually arriving, missed
   readings (from sequence gaps) and a small graph;
 - lets you turn each sensor on or off and pick a rate, but only rates the
@@ -61,10 +61,10 @@ sections 1-3 and 7 for context.
 Facts this app depends on:
 
 - The board (Nordic Thingy:91 today, Thingy:91 X later) has two chips. The
-  **LTE chip** (nRF9160) has the sensors but no Bluetooth. The **Bluetooth
+  **Application chip** (nRF9160) has the sensors but no Bluetooth. The **Bluetooth
   chip** (nRF52840) talks to the phone. So every sensor reading crosses a
   115200-baud UART between the chips, about 250 readings a second in total.
-- The Bluetooth chip runs an engineering GATT service and mcumgr (SMP)
+- The controller runs an engineering GATT service and mcumgr (SMP)
   over BLE, both **unauthenticated**, meant to be compiled out before real
   use.
 - Each chip boots a new image on trial and rolls back unless it confirms
@@ -86,8 +86,8 @@ RelayTest/
   Sensors.swift        sensor table (IDs match firmware shared/link/sensors.hpp),
                        value formatting, notification parser (Reading)
   Updater.swift        nRF Cloud release lookup, MCUboot header version read,
-                       BT chip update (mcumgr/SMP over BLE, minimal CBOR),
-                       LTE chip update (windowed transfer through the BT chip)
+                       Controller update (mcumgr/SMP over BLE, minimal CBOR),
+                       Application chip update (windowed transfer through the controller)
   Info.plist           Bluetooth usage string, MemfaultProjectKey from build settings
   Assets.xcassets      icon
 project.yml            XcodeGen spec (no .xcodeproj in git); iOS 17+, iPhone only
@@ -114,7 +114,7 @@ Deliberately small: two `ObservableObject`s and SwiftUI.
   - When Data notifications are on: send every enabled sensor's rate and
     start a 4 Hz timer that publishes counts to the UI (so a 100/s sensor
     doesn't redraw the screen 100 times a second) and reads RSSI. Info is
-    re-read every 5 s because the LTE chip's version and serial arrive a
+    re-read every 5 s because the application chip's version and serial arrive a
     little after connecting.
   - Per sensor it keeps raw state (`Live`): last sequence number, received,
     missed (gap in `seq`, ignoring jumps ≥ 1000 as a stream restart),
@@ -141,12 +141,12 @@ Defined by the firmware in `docs/ble-test-service.md`; summary:
 
 Sensor IDs: 1 motion, 2 impact, 3 environment, 4 light, 5 battery,
 6 LTE signal, 7 G7 status (counts and signal only, never a sensor ID),
-8 Bluetooth chip counters. 20+ are reserved for the Thingy:91 X. IDs are
+8 controller counters. 20+ are reserved for the Thingy:91 X. IDs are
 never reused. The table lives in both repos and must be changed in both.
 
 ## 6. Firmware updates from the phone
 
-1. **Check**: needs the LTE chip's serial (IMEI) from Info. Calls
+1. **Check**: needs the application chip's serial (IMEI) from Info. Calls
    `GET https://device.memfault.com/api/v0/releases/latest` with
    `Memfault-Project-Key`, `device_serial`, `hardware_version=thingy91`,
    `software_type=bt` or `app`, and `current_version=0.0.0` (so it always
@@ -154,18 +154,18 @@ never reused. The table lives in both repos and must be changed in both.
    HTTP Range request and takes the version from the MCUboot header
    (magic `0x96f3b83d`, version at byte 20), because the BT image is a
    component of a release named after the LTE version.
-2. **Update the Bluetooth chip**: download the image, turn all sensor
+2. **Update the controller**: download the image, turn all sensor
    streams off, then mcumgr image upload (group 1, command 1) over SMP,
    chunked to the write length, with reassembly on the chip. Each response
    gives the next offset. 5 s with no response resends; after 3 retries it
    stops. When done, write Control `03`; the chip reboots on trial and
-   confirms after a minute of talking to the LTE chip. Takes about 1.5 min.
-3. **Update the LTE chip**: download the image, streams off, write `10`
+   confirms after a minute of talking to the application chip. Takes about 1.5 min.
+3. **Update the application chip**: download the image, streams off, write `10`
    (size), then windows of 768 bytes as four 192-byte `11` writes, and wait
    for `20 <offset>`. 3 s with no ack resends the window; after 3 retries it
-   stops. The Bluetooth chip relays each write over the UART to the LTE
+   stops. The controller relays each write over the UART to the LTE
    chip, which buffers a window and writes it to flash. After the last ack,
-   write `12`; the LTE chip reboots on trial and confirms once on LTE for a
+   write `12`; the application chip reboots on trial and confirms once on LTE for a
    minute. Takes about 1 min for ~300 KB.
 
 The app does not verify the image itself. It relies on MCUboot's hash and
