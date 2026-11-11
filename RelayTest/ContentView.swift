@@ -54,7 +54,12 @@ struct DeviceList: View {
                         relay.connect(f)
                     } label: {
                         HStack {
-                            Text(f.name)
+                            VStack(alignment: .leading) {
+                                Text(f.name)
+                                // The 91 X advertises as "T1D relay X" (firmware 0.5.0 on).
+                                Text(f.name.hasSuffix(" X") ? "Thingy:91 X" : "Thingy:91")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             Spacer()
                             Text("\(f.rssi) dBm").foregroundStyle(.secondary).monospacedDigit()
                         }
@@ -71,6 +76,7 @@ struct SensorList: View {
     var body: some View {
         List {
             Section {
+                Text(relay.updater.isThingy91X ? "Thingy:91 X" : "Thingy:91").font(.headline)
                 HStack {
                     Text(relay.info.isEmpty ? "Connected" : relay.info)
                     Spacer()
@@ -109,6 +115,10 @@ struct FirmwareSection: View {
             }
             if !updater.message.isEmpty {
                 Text(updater.message).font(.footnote).foregroundStyle(.secondary)
+            }
+            if updater.isThingy91X {
+                Text("Thingy:91 X: a Bluetooth chip update replaces the old firmware (no automatic rollback). If it won't start, recover it over USB.")
+                    .font(.footnote).foregroundStyle(.orange)
             }
             if updater.checked && updater.latestLte != nil && updater.latestBt != nil {
                 Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll() }
@@ -176,7 +186,7 @@ struct SensorCell: View {
                 .font(.caption)
                 .monospacedDigit()
             }
-            Text(def.detail).font(.caption2).foregroundStyle(.secondary)
+            Text(def.detail(on: relay.updater.board)).font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
     }
