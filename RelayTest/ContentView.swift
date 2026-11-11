@@ -105,8 +105,8 @@ struct FirmwareSection: View {
 
     var body: some View {
         Section("Firmware") {
-            row(.bt, updater.btVersion, updater.latestBt)
-            row(.lte, updater.lteVersion, updater.latestLte)
+            row(.controller, updater.controllerVersion, updater.latestController)
+            row(.application, updater.applicationVersion, updater.latestApplication)
             if updater.busy != nil || updater.updatingAll {
                 ProgressView(value: updater.progress)
             }
@@ -120,7 +120,7 @@ struct FirmwareSection: View {
                 Text("\(updater.boardDef.name): \(note)")
                     .font(.footnote).foregroundStyle(.orange)
             }
-            if updater.checked && updater.latestLte != nil && updater.latestBt != nil {
+            if updater.checked && updater.latestApplication != nil && updater.latestController != nil {
                 Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll() }
                     .disabled(updater.busy != nil || updater.updatingAll)
             }

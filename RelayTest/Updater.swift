@@ -3,8 +3,8 @@ import Foundation
 
 /// Firmware updates from the phone (t1d-relay-firmware docs/ble-test-service.md).
 ///
-/// - Release files come from nRF Cloud (Memfault): software type "bt" for the
-///   controller, "app" for the application chip, hardware version = the board the
+/// - Release files come from nRF Cloud (Memfault): software type "controller" for the
+///   controller, "application" for the application chip, hardware version = the board the
 ///   relay says it is ("thingy91" or "thingy91x"), so a board is only ever
 ///   offered its own images.
 /// - controller: mcumgr (SMP) image upload over Bluetooth, then control
@@ -18,7 +18,7 @@ import Foundation
 /// firmware running. The Thingy:91 X's controller (nRF5340) overwrites
 /// its old image instead: no rollback, button recovery if a build is bad.
 final class Updater: ObservableObject {
-    enum Chip: String { case bt = "Controller", lte = "Application chip" }
+    enum Chip: String { case controller = "Controller", application = "Application chip" }
 
     struct Release: Equatable {
         let version: String
@@ -26,8 +26,8 @@ final class Updater: ObservableObject {
         let size: Int
     }
 
-    @Published var btVersion = "?"
-    @Published var lteVersion = "?"
+    @Published var controllerVersion = "?"
+    @Published var applicationVersion = "?"
     @Published var serial = ""
     /// "thingy91" or "thingy91x" (from Bluetooth firmware 0.5.0; "" before,
     /// which is always a Thingy:91).
@@ -38,8 +38,8 @@ final class Updater: ObservableObject {
     /// Seconds since the controller last heard the application chip (Bluetooth
     /// firmware 0.4.6 and later; nil before).
     @Published var heard: Int?
-    @Published var latestBt: Release?
-    @Published var latestLte: Release?
+    @Published var latestController: Release?
+    @Published var latestApplication: Release?
     @Published var checked = false
     @Published var busy: Chip?
     @Published var progress = 0.0
@@ -74,11 +74,11 @@ final class Updater: ObservableObject {
     @Published var updatingAll = false
     private var allQueue: [Chip] = []
     /// After the application chip's update: the version to see before going on.
-    private var waitingForLte: String?
+    private var waitingForApplication: String?
     /// When the application chip got its image. A reinstall keeps the same version,
     /// so the version alone can't show it has restarted: wait at least 15 s
     /// and for the controller to hear it again.
-    private var lteSentAt = Date.distantPast
+    private var applicationSentAt = Date.distantPast
     private var waitTimer: Timer?
     /// After a stall: the chip to update again once the chips can talk again
     /// (the stuck chip restarts itself, the app reconnects).
@@ -90,35 +90,35 @@ final class Updater: ObservableObject {
 
     // MARK: Device info
 
-    /// "relay-bt 0.4.2 link 3 lte 0.4.4 serial 352656101102872"
+    /// "controller 0.5.3 link 3 application 0.5.4 serial 352656101102872 heard 1 upd 0/0 board thingy91x"
     func parseInfo(_ text: String) {
         let w = text.split(separator: " ").map(String.init)
         func after(_ key: String) -> String? {
             guard let i = w.firstIndex(of: key), i + 1 < w.count else { return nil }
             return w[i + 1]
         }
-        btVersion = after("relay-bt") ?? "?"
-        lteVersion = after("lte") ?? "?"
+        controllerVersion = after("controller") ?? "?"
+        applicationVersion = after("application") ?? "?"
         let newSerial = after("serial") ?? ""
         let newBoard = after("board") ?? ""
         if (!newSerial.isEmpty && !serial.isEmpty && newSerial != serial) || newBoard != board {
             // A different relay: what was found for the last one doesn't apply.
-            latestBt = nil
-            latestLte = nil
+            latestController = nil
+            latestApplication = nil
             checked = false
         }
         board = newBoard
         serial = newSerial
         heard = after("heard").flatMap { Int($0) }
         if let c = resumeChip, busy == nil, linkOK, peripheral != nil,
-           (c == .bt ? smp : update) != nil {
+           (c == .controller ? smp : update) != nil {
             resumeChip = nil
             resumeTimer?.invalidate()
             begin(c)
         }
-        if let want = waitingForLte, lteVersion.hasPrefix(want),
-           Date().timeIntervalSince(lteSentAt) > 15, (heard ?? 0) <= 10 {
-            waitingForLte = nil
+        if let want = waitingForApplication, applicationVersion.hasPrefix(want),
+           Date().timeIntervalSince(applicationSentAt) > 15, (heard ?? 0) <= 10 {
+            waitingForApplication = nil
             waitTimer?.invalidate()
             startNextOfAll()
         }
@@ -139,8 +139,8 @@ final class Updater: ObservableObject {
     /// Chips whose newest release differs from what they run.
     var outdated: [Chip] {
         var chips: [Chip] = []
-        if let l = latestLte, !lteVersion.hasPrefix(l.version) { chips.append(.lte) }
-        if let b = latestBt, !btVersion.hasPrefix(b.version) { chips.append(.bt) }
+        if let l = latestApplication, !applicationVersion.hasPrefix(l.version) { chips.append(.application) }
+        if let b = latestController, !controllerVersion.hasPrefix(b.version) { chips.append(.controller) }
         return chips
     }
 
@@ -150,11 +150,11 @@ final class Updater: ObservableObject {
         guard busy == nil, !updatingAll else { return }
         // Both chips every time, LTE first: an update where either is
         // behind, a reinstall of both when they're current.
-        guard latestLte != nil, latestBt != nil else {
+        guard latestApplication != nil, latestController != nil else {
             message = "Check for updates first."
             return
         }
-        allQueue = [.lte, .bt]
+        allQueue = [.application, .controller]
         updatingAll = true
         startNextOfAll()
     }
@@ -174,7 +174,7 @@ final class Updater: ObservableObject {
     private func stopAll() {
         updatingAll = false
         allQueue = []
-        waitingForLte = nil
+        waitingForApplication = nil
         waitTimer?.invalidate()
         waitTimer = nil
     }
@@ -193,8 +193,8 @@ final class Updater: ObservableObject {
         message = "Checking nRF Cloud…"
         Task { @MainActor in
             do {
-                latestBt = try await latest(type: "bt")
-                latestLte = try await latest(type: "app")
+                latestController = try await latest(type: "controller")
+                latestApplication = try await latest(type: "application")
                 checked = true
                 message = ""
             } catch {
@@ -251,17 +251,17 @@ final class Updater: ObservableObject {
         guard busy == nil else { return }
         autoRetries = 0
         resumeChip = nil
-        if chip == .lte && !linkOK {
-            waitForLink(.lte, "The controller isn't hearing the application chip right now.")
+        if chip == .application && !linkOK {
+            waitForLink(.application, "The controller isn't hearing the application chip right now.")
             return
         }
         begin(chip)
     }
 
     private func begin(_ chip: Chip) {
-        guard busy == nil, let rel = chip == .bt ? latestBt : latestLte else { return }
-        guard peripheral != nil, (chip == .bt ? smp : update) != nil else {
-            message = chip == .bt
+        guard busy == nil, let rel = chip == .controller ? latestController : latestApplication else { return }
+        guard peripheral != nil, (chip == .controller ? smp : update) != nil else {
+            message = chip == .controller
                 ? "The controller has no update service (firmware before 0.4.2)."
                 : "The controller can't pass updates on (firmware before 0.4.2)."
             return
@@ -279,7 +279,7 @@ final class Updater: ObservableObject {
                 tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
-                if chip == .bt { smpSend() } else { lteBegin() }
+                if chip == .controller { smpSend() } else { lteBegin() }
             } catch {
                 finish("Download failed: \(error.localizedDescription)")
             }
@@ -320,7 +320,7 @@ final class Updater: ObservableObject {
         resumeTimer?.invalidate()
         resumeTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
             guard let self, self.resumeChip != nil else { return }
-            self.finish("The chips still can't talk to each other after 3 minutes, so the update stopped. Nothing was installed. Check the board (`bt status`).")
+            self.finish("The chips still can't talk to each other after 3 minutes, so the update stopped. Nothing was installed. Check the board (`controller status`).")
         }
     }
 
@@ -341,7 +341,7 @@ final class Updater: ObservableObject {
             guard let self, self.busy != nil else { return }
             self.tries += 1
             if self.tries > limit {
-                let who = self.busy == .lte ? "the application chip (through the controller)" : "the controller"
+                let who = self.busy == .application ? "the application chip (through the controller)" : "the controller"
                 self.retryLater(self.busy!, "No answer from \(who).")
             } else {
                 self.outbox.removeAll() // a retry sends it all again
@@ -390,7 +390,7 @@ final class Updater: ObservableObject {
     }
 
     func smpResponse(_ data: Data) {
-        guard busy == .bt, data.count > 8, data[data.startIndex + 5] == 1 else { return }
+        guard busy == .controller, data.count > 8, data[data.startIndex + 5] == 1 else { return }
         let fields = CBOR.intMap(data.dropFirst(8))
         if let rc = fields["rc"], rc != 0 {
             finish("The controller refused the image (mcumgr error \(rc)).")
@@ -445,7 +445,7 @@ final class Updater: ObservableObject {
     }
 
     func updateNotification(_ data: Data) {
-        guard busy == .lte, data.count >= 5 else { return }
+        guard busy == .application, data.count >= 5 else { return }
         let b = [UInt8](data)
         let v = UInt32(b[1]) | UInt32(b[2]) << 8 | UInt32(b[3]) << 16 | UInt32(b[4]) << 24
         if b[0] == 0x21 {
@@ -465,15 +465,15 @@ final class Updater: ObservableObject {
             busy = nil
             autoRetries = 0
             message = "Application chip restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
-            if updatingAll, !allQueue.isEmpty, let want = latestLte?.version {
+            if updatingAll, !allQueue.isEmpty, let want = latestApplication?.version {
                 // The controller goes next, once the application chip is back and
                 // reports the new version (the app re-reads it every few seconds).
-                waitingForLte = want
-                lteSentAt = Date()
+                waitingForApplication = want
+                applicationSentAt = Date()
                 message = "Application chip restarting on \(want). The controller goes next, once the application chip is back (about 30 s)…"
                 waitTimer?.invalidate()
                 waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
-                    guard let self, self.waitingForLte != nil else { return }
+                    guard let self, self.waitingForApplication != nil else { return }
                     self.stopAll()
                     self.message = "The application chip didn't come back on \(want) within 3 minutes, so the controller wasn't updated. If it went back to the old version, its update didn't keep; check again and retry."
                 }

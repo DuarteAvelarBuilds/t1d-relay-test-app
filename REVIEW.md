@@ -135,7 +135,7 @@ Defined by the firmware in `docs/ble-test-service.md`; summary:
 | Service | `42800001-C846-48AD-9A69-38EF49048320` | test service |
 | Data | `…0002` | notify: `[sensor u8][count u8 or 0xFF=error][seq u16][t_ms u32][count × int32]`, little-endian |
 | Control | `…0003` | write: `01 <sensor> <ms u16>` set rate (0 = off), `02` all off, `03` boot the uploaded BT image on trial |
-| Info | `…0004` | read: `relay-bt <ver> link <proto> lte <ver> serial <IMEI>` |
+| Info | `…0004` | read: `controller <ver> link <proto> application <ver> serial <IMEI> heard <s> upd <d>/<l> board <board>` |
 | LTE update | `…0005` | write `10 <size u32>`, `11 <offset u32> <≤192 bytes>`, `12`; notify `20 <next offset u32>`, `21 <code i32>` |
 | SMP service / char | `8D53DC1D-…` / `DA2E7828-…` | standard mcumgr over BLE |
 
@@ -149,7 +149,7 @@ never reused. The table lives in both repos and must be changed in both.
 1. **Check**: needs the application chip's serial (IMEI) from Info. Calls
    `GET https://device.memfault.com/api/v0/releases/latest` with
    `Memfault-Project-Key`, `device_serial`, `hardware_version=thingy91`,
-   `software_type=bt` or `app`, and `current_version=0.0.0` (so it always
+   `software_type=controller` or `application`, and `current_version=0.0.0` (so it always
    returns the newest). Then reads the first 32 bytes of each image with an
    HTTP Range request and takes the version from the MCUboot header
    (magic `0x96f3b83d`, version at byte 20), because the BT image is a

@@ -154,7 +154,7 @@ enum Sensors {
             let state = Int(v[0]) < g7States.count ? g7States[Int(v[0])] : "?"
             let rssi = v[1] == 0 ? "" : " · \(v[1]) dBm"
             return "\(state)\(rssi) · \(v[2]) close · \(v[3]) heard"
-        case "btstats":
+        case "controllerstats":
             guard v.count >= 4 else { return "?" }
             return "in \(v[0]) · bad \(v[1]) · dropped \(v[2]) · failed \(v[3])"
         default:
