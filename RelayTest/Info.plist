@@ -28,6 +28,12 @@
 	<string>Relay Test connects to the T1D relay over Bluetooth to show its sensors.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Keep the Bluetooth link (and a firmware update) going when the app
+	     leaves the screen; without it iOS drops the link a few seconds later. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
