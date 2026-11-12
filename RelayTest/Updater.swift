@@ -61,6 +61,13 @@ final class Updater: ObservableObject {
     /// repeated "get ready" or window again), and acting on it would send
     /// the same window twice, then four times… which jammed a reinstall.
     private var windowSentFrom: Int?
+    /// When the window now in flight was first sent, and the usual time from
+    /// a window's first send to its answer. The retry wait follows it: a
+    /// fixed 1 s wait was shorter than a busy link's round trip, so the app
+    /// resent windows whose answer was still on its way, the extra copies
+    /// slowed the link more, and every window ended up taking ~3 s.
+    private var windowFirstSent = Date()
+    private var roundTrip: TimeInterval = 0.8
     /// Retries since the chip last answered; the update gives up after 3.
     private var tries = 0
     private var timer: Timer?
@@ -279,6 +286,7 @@ final class Updater: ObservableObject {
                 image = data
                 acked = 0
                 windowSentFrom = nil
+                roundTrip = 0.8
                 tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
@@ -438,6 +446,8 @@ final class Updater: ObservableObject {
         arm(3) { [weak self] in self?.lteBegin() }
     }
 
+    private var windowWait: TimeInterval { min(max(3 * roundTrip, 2), 6) }
+
     private func lteSendWindow() {
         let end = min(acked + Self.window, image.count)
         windowSentFrom = acked
@@ -448,10 +458,11 @@ final class Updater: ObservableObject {
             write([0x11] + le32(UInt32(off)) + [UInt8](image.subdata(in: off..<off + n)))
             off += n
         }
-        // A window's answer normally comes back in well under half a second
-        // (the 3 s wait in lteBegin is for the chip making room). Waiting 3 s
-        // here turned every lost answer into a long pause.
-        arm(1, tries: 8) { [weak self] in self?.lteSendWindow() }
+        if tries == 0 { windowFirstSent = Date() }
+        // Wait three usual round trips (2-6 s): long enough that a late answer
+        // isn't mistaken for a lost one, short enough that a real loss costs
+        // a few seconds.
+        arm(windowWait, tries: 8) { [weak self] in self?.lteSendWindow() }
     }
 
     func updateNotification(_ data: Data) {
@@ -475,7 +486,11 @@ final class Updater: ObservableObject {
             Log.update.notice("t=\(Log.ms()) notify ack \(v) IGNORED (stale, window from \(from))")
             return // duplicate or stale: the retry timer covers a real loss
         }
-        Log.update.notice("t=\(Log.ms()) notify ack \(v) ACCEPTED (window from \(self.windowSentFrom ?? -1), tries \(self.tries))")
+        if tries == 0 {
+            // Only answers to a first send measure the round trip.
+            roundTrip = 0.8 * roundTrip + 0.2 * Date().timeIntervalSince(windowFirstSent)
+        }
+        Log.update.notice("t=\(Log.ms()) notify ack \(v) ACCEPTED (window from \(self.windowSentFrom ?? -1), tries \(self.tries), round trip \(self.roundTrip, format: .fixed(precision: 2)) s)")
         acked = Int(v)
         tries = 0
         showProgress()
