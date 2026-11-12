@@ -121,7 +121,12 @@ struct FirmwareSection: View {
                     .font(.footnote).foregroundStyle(.orange)
             }
             if updater.checked && updater.latestApplication != nil && updater.latestController != nil {
-                Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll() }
+                Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll(.a) }
+                    .disabled(updater.busy != nil || updater.updatingAll)
+            }
+            if updater.checked, let a = updater.other(.application), let c = updater.other(.controller),
+               a.copy == c.copy {
+                Button("Switch both to \(a.release.version) / \(c.release.version)") { updater.updateAll(a.copy) }
                     .disabled(updater.busy != nil || updater.updatingAll)
             }
             Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
@@ -139,9 +144,16 @@ struct FirmwareSection: View {
             }
             Spacer()
             if let latest {
-                Button(latest.version == running ? "Reinstall" : "Update") { updater.start(chip) }
-                    .buttonStyle(.bordered)
-                    .disabled(updater.busy != nil || updater.updatingAll)
+                VStack(alignment: .trailing) {
+                    Button(Updater.sameVersion(running, latest.version) ? "Reinstall" : "Update") { updater.start(chip) }
+                        .buttonStyle(.bordered)
+                        .disabled(updater.busy != nil || updater.updatingAll)
+                    if let o = updater.other(chip) {
+                        Button("Install \(o.release.version)") { updater.start(chip, o.copy) }
+                            .buttonStyle(.bordered)
+                            .disabled(updater.busy != nil || updater.updatingAll)
+                    }
+                }
             }
         }
     }

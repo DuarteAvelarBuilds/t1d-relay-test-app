@@ -41,6 +41,14 @@ final class Updater: ObservableObject {
     @Published var heard: Int?
     @Published var latestController: Release?
     @Published var latestApplication: Release?
+    /// The B copy for update testing: the same code as the newest release,
+    /// only its version differs ("0.5.10-b"). Published by the firmware
+    /// workflow's "ab" run under the hardware version "<board>-b".
+    @Published var latestControllerB: Release?
+    @Published var latestApplicationB: Release?
+    enum Copy { case a, b }
+    /// Which copy the update now running (or about to) installs.
+    private var wanted: Copy = .a
     @Published var checked = false
     @Published var busy: Chip?
     @Published var progress = 0.0
@@ -81,6 +89,7 @@ final class Updater: ObservableObject {
     /// while it restarts), the controller last (its restart drops the link).
     @Published var updatingAll = false
     private var allQueue: [Chip] = []
+    private var allCopy: Copy = .a
     /// After the application's update: the version to see before going on.
     private var waitingForApplication: String?
     /// When the application got its image. A reinstall keeps the same version,
@@ -113,6 +122,8 @@ final class Updater: ObservableObject {
             // A different relay: what was found for the last one doesn't apply.
             latestController = nil
             latestApplication = nil
+            latestControllerB = nil
+            latestApplicationB = nil
             checked = false
         }
         board = newBoard
@@ -124,7 +135,7 @@ final class Updater: ObservableObject {
             resumeTimer?.invalidate()
             begin(c)
         }
-        if let want = waitingForApplication, applicationVersion.hasPrefix(want),
+        if let want = waitingForApplication, Self.sameVersion(applicationVersion, want),
            Date().timeIntervalSince(applicationSentAt) > 15, (heard ?? 0) <= 10 {
             waitingForApplication = nil
             waitTimer?.invalidate()
@@ -144,21 +155,51 @@ final class Updater: ObservableObject {
             : "The controller hasn't heard the application for \(h) s. It restarts itself after 45 s, or the application resets it."
     }
 
+    /// Exact version match. A running image that hasn't confirmed yet reports
+    /// "-trial" after its version. Not a prefix match: "0.5.10" is a prefix of
+    /// the B copy "0.5.10-b" and the two must not look alike.
+    static func sameVersion(_ running: String, _ release: String) -> Bool {
+        running == release || running == release + "-trial"
+    }
+
     /// Chips whose newest release differs from what they run.
     var outdated: [Chip] {
         var chips: [Chip] = []
-        if let l = latestApplication, !applicationVersion.hasPrefix(l.version) { chips.append(.application) }
-        if let b = latestController, !controllerVersion.hasPrefix(b.version) { chips.append(.controller) }
+        if let l = latestApplication, !Self.sameVersion(applicationVersion, l.version) { chips.append(.application) }
+        if let b = latestController, !Self.sameVersion(controllerVersion, b.version) { chips.append(.controller) }
         return chips
+    }
+
+    func release(_ chip: Chip, _ copy: Copy) -> Release? {
+        switch (chip, copy) {
+        case (.controller, .a): return latestController
+        case (.controller, .b): return latestControllerB
+        case (.application, .a): return latestApplication
+        case (.application, .b): return latestApplicationB
+        }
+    }
+
+    /// The copy a chip is not running: B when it runs A (or anything else),
+    /// A when it runs B. nil until that copy has been found.
+    func other(_ chip: Chip) -> (copy: Copy, release: Release)? {
+        let running = chip == .controller ? controllerVersion : applicationVersion
+        let runningB = release(chip, .b).map { Self.sameVersion(running, $0.version) } ?? false
+        let copy: Copy = runningB ? .a : .b
+        return release(chip, copy).map { (copy, $0) }
     }
 
     // MARK: Update all
 
-    func updateAll() {
+    func updateAll(_ copy: Copy = .a) {
         guard busy == nil, !updatingAll else { return }
+        guard release(.application, copy) != nil, release(.controller, copy) != nil else {
+            message = "That copy isn't published for this board."
+            return
+        }
+        allCopy = copy
         // Both chips every time, LTE first: an update where either is
         // behind, a reinstall of both when they're current.
-        guard latestApplication != nil, latestController != nil else {
+        guard checked else {
             message = "Check for updates first."
             return
         }
@@ -173,7 +214,7 @@ final class Updater: ObservableObject {
             updatingAll = false
             return
         }
-        start(allQueue.removeFirst())
+        start(allQueue.removeFirst(), allCopy)
         if busy == nil && resumeChip == nil {
             stopAll() // start() couldn't begin and said why in `message`
         }
@@ -205,6 +246,9 @@ final class Updater: ObservableObject {
                 // The application's Memfault software type is "app" (the
                 // project's primary type), not "application".
                 latestApplication = try await latest(type: "app")
+                // The B copy is optional: nil when the "ab" run hasn't published it.
+                latestControllerB = try? await latest(type: "controller", hardware: hardwareVersion + "-b")
+                latestApplicationB = try? await latest(type: "app", hardware: hardwareVersion + "-b")
                 checked = true
                 message = ""
             } catch {
@@ -213,11 +257,11 @@ final class Updater: ObservableObject {
         }
     }
 
-    private func latest(type: String) async throws -> Release? {
+    private func latest(type: String, hardware: String? = nil) async throws -> Release? {
         var c = URLComponents(string: "https://device.memfault.com/api/v0/releases/latest")!
         c.queryItems = [
             URLQueryItem(name: "device_serial", value: serial),
-            URLQueryItem(name: "hardware_version", value: hardwareVersion),
+            URLQueryItem(name: "hardware_version", value: hardware ?? hardwareVersion),
             URLQueryItem(name: "software_type", value: type),
             // Ask as if from 0.0.0 so the newest release always comes back.
             URLQueryItem(name: "current_version", value: "0.0.0"),
@@ -236,7 +280,9 @@ final class Updater: ObservableObject {
         // release version is the LTE one. The image's own MCUboot header says
         // which version it really is; read just its first 32 bytes.
         let version = try? await imageVersion(url)
-        return Release(version: version ?? a.component_version ?? body.component_version ?? body.version,
+        // The B copy's header says the same 0.5.10; the board reports "0.5.10-b".
+        let suffix = hardware == nil ? "" : "-b"
+        return Release(version: (version ?? a.component_version ?? body.component_version ?? body.version) + suffix,
                        url: url, size: a.file_size ?? 0)
     }
 
@@ -257,8 +303,9 @@ final class Updater: ObservableObject {
 
     /// The Update buttons. The application's update goes through the Bluetooth
     /// chip, so it waits for the link between them to be working.
-    func start(_ chip: Chip) {
+    func start(_ chip: Chip, _ copy: Copy = .a) {
         guard busy == nil else { return }
+        wanted = copy
         autoRetries = 0
         resumeChip = nil
         if chip == .application && !linkOK {
@@ -269,7 +316,7 @@ final class Updater: ObservableObject {
     }
 
     private func begin(_ chip: Chip) {
-        guard busy == nil, let rel = chip == .controller ? latestController : latestApplication else { return }
+        guard busy == nil, let rel = release(chip, wanted) else { return }
         guard peripheral != nil, (chip == .controller ? smp : update) != nil else {
             message = chip == .controller
                 ? "The controller has no update service (firmware before 0.4.2)."
@@ -500,7 +547,7 @@ final class Updater: ObservableObject {
             busy = nil
             autoRetries = 0
             message = "Application restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
-            if updatingAll, !allQueue.isEmpty, let want = latestApplication?.version {
+            if updatingAll, !allQueue.isEmpty, let want = release(.application, allCopy)?.version {
                 // The controller goes next, once the application is back and
                 // reports the new version (the app re-reads it every few seconds).
                 waitingForApplication = want
