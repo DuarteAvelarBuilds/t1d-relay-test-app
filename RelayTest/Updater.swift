@@ -4,7 +4,8 @@ import Foundation
 /// Firmware updates from the phone (t1d-relay-firmware docs/ble-test-service.md).
 ///
 /// - Release files come from nRF Cloud (Memfault): software type "controller" for the
-///   controller, "application" for the application chip, hardware version = the board the
+///   controller, "app" for the application chip (the Memfault project's primary
+///   type, so it keeps its old name), hardware version = the board the
 ///   relay says it is ("thingy91" or "thingy91x"), so a board is only ever
 ///   offered its own images.
 /// - controller: mcumgr (SMP) image upload over Bluetooth, then control
@@ -194,7 +195,9 @@ final class Updater: ObservableObject {
         Task { @MainActor in
             do {
                 latestController = try await latest(type: "controller")
-                latestApplication = try await latest(type: "application")
+                // The application chip's Memfault software type is "app" (the
+                // project's primary type), not "application".
+                latestApplication = try await latest(type: "app")
                 checked = true
                 message = ""
             } catch {
