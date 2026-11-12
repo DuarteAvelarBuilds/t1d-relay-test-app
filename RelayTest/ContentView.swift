@@ -166,6 +166,9 @@ struct SensorCell: View {
                 Text(row.failedText ?? row.text)
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(row.failedText == nil ? .primary : Color.red)
+                if def.kind == "compass" {
+                    CompassControls(relay: relay, model: relay.compass)
+                }
                 if row.graph.count > 1 {
                     Sparkline(values: row.graph).frame(height: 30)
                 }
@@ -197,6 +200,50 @@ struct SensorCell: View {
         guard let last = row.lastUpdate else { return .orange }
         let late = max(3.0, 3 * Double(row.interval) / 1000)
         return Date().timeIntervalSince(last) > late ? .orange : .green
+    }
+}
+
+/// Calibrate / set north buttons under the compass reading.
+struct CompassControls: View {
+    let relay: Relay
+    @ObservedObject var model: CompassModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch model.phase {
+            case .turning(let covered):
+                Text("Lay the board flat, face up. Turn it slowly clockwise (seen from above) through one full circle, then tap Done. Directions covered: \(covered) of \(CompassModel.sectors).")
+                    .font(.footnote)
+                HStack {
+                    Button("Done") { model.finish() }.buttonStyle(.borderedProminent)
+                    Button("Cancel") { model.cancel() }.buttonStyle(.bordered)
+                }
+            case .failed(let why):
+                Text(why).font(.footnote).foregroundStyle(.orange)
+                Button("Try again") { start() }.buttonStyle(.bordered)
+            case .idle:
+                HStack {
+                    Button(model.cal == nil ? "Calibrate" : "Calibrate again") { start() }
+                        .buttonStyle(.bordered)
+                    if model.cal != nil {
+                        Button("Set north") { model.setNorth() }.buttonStyle(.bordered)
+                        Button("Clear", role: .destructive) { model.clear() }.buttonStyle(.bordered)
+                    }
+                }
+                if let c = model.cal {
+                    Text(String(format: "Calibrated: sideways field %.0f µT, offset x %+.0f y %+.0f µT. %@",
+                                c.radius, c.offset[0], c.offset[1],
+                                c.northSet ? "North set." : "To finish: point the edge you call the front at north (iPhone Compass), tap Set north."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func start() {
+        // 10 readings a second is plenty for a slow turn.
+        relay.setInterval(21, 100)
+        model.start()
     }
 }
 

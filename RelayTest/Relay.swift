@@ -44,6 +44,7 @@ final class Relay: NSObject, ObservableObject {
     @Published var info = ""
     @Published var linkRssi: Int?
     let updater = Updater()
+    let compass = CompassModel()
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -96,6 +97,7 @@ final class Relay: NSObject, ObservableObject {
     func connect(_ f: Found) {
         central.stopScan()
         peripheral = f.peripheral
+        compass.use(device: f.peripheral.identifier.uuidString)
         f.peripheral.delegate = self
         status = .connecting
         userDisconnected = false
@@ -171,8 +173,10 @@ final class Relay: NSObject, ObservableObject {
         } else {
             l.failedText = nil
             l.values = r.values
+            if r.sensor == 21 { compass.feed(r.values) }
             if let def = Sensors.all.first(where: { $0.id == r.sensor }), let g = def.graphValue {
-                l.graph.append(g(r.values))
+                // The compass graph is the calibrated heading (the raw atan2 until calibrated).
+                l.graph.append(def.kind == "compass" ? (compass.heading(r.values) ?? g(r.values)) : g(r.values))
                 if l.graph.count > 60 { l.graph.removeFirst(l.graph.count - 60) }
             }
         }
@@ -194,7 +198,7 @@ final class Relay: NSObject, ObservableObject {
             rows[i].lastUpdate = l.lastUpdate
             rows[i].graph = l.graph
             if let def = Sensors.all.first(where: { $0.id == id }), !l.values.isEmpty {
-                rows[i].text = def.format(l.values)
+                rows[i].text = def.kind == "compass" ? compass.text(l.values) : def.format(l.values)
             }
         }
         peripheral?.readRSSI()
