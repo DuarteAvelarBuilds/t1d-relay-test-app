@@ -4,22 +4,22 @@ import Foundation
 /// Firmware updates from the phone (t1d-relay-firmware docs/ble-test-service.md).
 ///
 /// - Release files come from nRF Cloud (Memfault): software type "controller" for the
-///   controller, "app" for the application chip (the Memfault project's primary
+///   controller, "app" for the application (the Memfault project's primary
 ///   type, so it keeps its old name), hardware version = the board the
 ///   relay says it is ("thingy91" or "thingy91x"), so a board is only ever
 ///   offered its own images.
 /// - controller: mcumgr (SMP) image upload over Bluetooth, then control
 ///   op 03 boots it on trial.
-/// - application chip: no Bluetooth of its own, so the image goes to the Bluetooth
+/// - application: no Bluetooth of its own, so the image goes to the Bluetooth
 ///   chip's LTE-update characteristic, which passes it over the wires, in
-///   768-byte windows that the application chip acknowledges.
+///   768-byte windows that the application acknowledges.
 ///
 /// On the Thingy:91 both chips boot a new image on trial and roll back unless
 /// it confirms itself, so a failed or interrupted update leaves the old
 /// firmware running. The Thingy:91 X's controller (nRF5340) overwrites
 /// its old image instead: no rollback, button recovery if a build is bad.
 final class Updater: ObservableObject {
-    enum Chip: String { case controller = "Controller", application = "Application chip" }
+    enum Chip: String { case controller = "Controller", application = "Application" }
 
     struct Release: Equatable {
         let version: String
@@ -36,7 +36,7 @@ final class Updater: ObservableObject {
     /// This relay's device definition (Boards.json).
     var boardDef: BoardDef { Boards.find(board) }
     var hardwareVersion: String { boardDef.updates.hardwareVersion }
-    /// Seconds since the controller last heard the application chip (Bluetooth
+    /// Seconds since the controller last heard the application (Bluetooth
     /// firmware 0.4.6 and later; nil before).
     @Published var heard: Int?
     @Published var latestController: Release?
@@ -56,7 +56,7 @@ final class Updater: ObservableObject {
 
     private var image = Data()
     private var acked = 0
-    /// Application chip: where the window now in flight starts. An answer that
+    /// Application: where the window now in flight starts. An answer that
     /// doesn't go past it is a duplicate or stale (the chip answers a
     /// repeated "get ready" or window again), and acting on it would send
     /// the same window twice, then four times… which jammed a reinstall.
@@ -81,9 +81,9 @@ final class Updater: ObservableObject {
     /// while it restarts), the controller last (its restart drops the link).
     @Published var updatingAll = false
     private var allQueue: [Chip] = []
-    /// After the application chip's update: the version to see before going on.
+    /// After the application's update: the version to see before going on.
     private var waitingForApplication: String?
-    /// When the application chip got its image. A reinstall keeps the same version,
+    /// When the application got its image. A reinstall keeps the same version,
     /// so the version alone can't show it has restarted: wait at least 15 s
     /// and for the controller to hear it again.
     private var applicationSentAt = Date.distantPast
@@ -132,7 +132,7 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// The application chip's lines are reaching the controller. Unknown counts as
+    /// The application's lines are reaching the controller. Unknown counts as
     /// fine (older Bluetooth firmware doesn't say).
     var linkOK: Bool { (heard ?? 0) <= 20 }
 
@@ -140,8 +140,8 @@ final class Updater: ObservableObject {
     var linkText: String? {
         guard let h = heard else { return nil }
         return h <= 20
-            ? "Chip link OK (controller heard the application chip \(h) s ago)"
-            : "The controller hasn't heard the application chip for \(h) s. It restarts itself after 45 s, or the application chip resets it."
+            ? "Chip link OK (controller heard the application \(h) s ago)"
+            : "The controller hasn't heard the application for \(h) s. It restarts itself after 45 s, or the application resets it."
     }
 
     /// Chips whose newest release differs from what they run.
@@ -195,14 +195,14 @@ final class Updater: ObservableObject {
             return
         }
         guard !serial.isEmpty else {
-            message = "Waiting for the application chip to send its serial… try again in a few seconds."
+            message = "Waiting for the application to send its serial… try again in a few seconds."
             return
         }
         message = "Checking nRF Cloud…"
         Task { @MainActor in
             do {
                 latestController = try await latest(type: "controller")
-                // The application chip's Memfault software type is "app" (the
+                // The application's Memfault software type is "app" (the
                 // project's primary type), not "application".
                 latestApplication = try await latest(type: "app")
                 checked = true
@@ -232,7 +232,7 @@ final class Updater: ObservableObject {
         struct Body: Decodable { let version: String; let artifacts: [Artifact]; let component_version: String? }
         let body = try JSONDecoder().decode(Body.self, from: data)
         guard let a = body.artifacts.first, let url = URL(string: a.url) else { return nil }
-        // The controller is a component of the application chip's release, so the
+        // The controller is a component of the application's release, so the
         // release version is the LTE one. The image's own MCUboot header says
         // which version it really is; read just its first 32 bytes.
         let version = try? await imageVersion(url)
@@ -255,14 +255,14 @@ final class Updater: ObservableObject {
 
     // MARK: Start
 
-    /// The Update buttons. The application chip's update goes through the Bluetooth
+    /// The Update buttons. The application's update goes through the Bluetooth
     /// chip, so it waits for the link between them to be working.
     func start(_ chip: Chip) {
         guard busy == nil else { return }
         autoRetries = 0
         resumeChip = nil
         if chip == .application && !linkOK {
-            waitForLink(.application, "The controller isn't hearing the application chip right now.")
+            waitForLink(.application, "The controller isn't hearing the application right now.")
             return
         }
         begin(chip)
@@ -356,7 +356,7 @@ final class Updater: ObservableObject {
             self.tries += 1
             Log.update.notice("t=\(Log.ms()) timer fired after \(seconds, format: .fixed(precision: 1)) s: try \(self.tries) of \(limit), acked \(self.acked), window from \(self.windowSentFrom ?? -1), outbox \(self.outbox.count)")
             if self.tries > limit {
-                let who = self.busy == .application ? "the application chip (through the controller)" : "the controller"
+                let who = self.busy == .application ? "the application (through the controller)" : "the controller"
                 self.retryLater(self.busy!, "No answer from \(who).")
             } else {
                 self.outbox.removeAll() // a retry sends it all again
@@ -425,21 +425,21 @@ final class Updater: ObservableObject {
             busy = nil
             message = updatingAll
                 ? "Both chips updated. The controller is restarting now; the app reconnects by itself in about 30 s, and each chip keeps its update after a minute of working."
-                : "Controller restarting on the new firmware. The app reconnects by itself in about 30 s; it keeps the update once it's talked to the application chip for a minute."
+                : "Controller restarting on the new firmware. The app reconnects by itself in about 30 s; it keeps the update once it's talked to the application for a minute."
             stopAll()
         } else {
             smpSend()
         }
     }
 
-    // MARK: application chip: through the controller
+    // MARK: application: through the controller
 
     private static let window = 768
     private static let piece = 192
 
     private func lteBegin() {
         if tries == 0 {
-            message = "Asking the application chip to get ready (it makes room for the update)…"
+            message = "Asking the application to get ready (it makes room for the update)…"
         }
         Log.update.notice("t=\(Log.ms()) send begin 0x10 size \(self.image.count) try \(self.tries)")
         write([0x10] + le32(UInt32(image.count)))
@@ -475,7 +475,7 @@ final class Updater: ObservableObject {
         let v = UInt32(b[1]) | UInt32(b[2]) << 8 | UInt32(b[3]) << 16 | UInt32(b[4]) << 24
         if b[0] == 0x21 {
             Log.update.notice("t=\(Log.ms()) notify \(raw, privacy: .public) ERROR \(Int32(bitPattern: v))")
-            finish("The application chip refused the image (error \(Int32(bitPattern: v))).")
+            finish("The application refused the image (error \(Int32(bitPattern: v))).")
             return
         }
         guard b[0] == 0x20 else {
@@ -499,18 +499,18 @@ final class Updater: ObservableObject {
             write([0x12])
             busy = nil
             autoRetries = 0
-            message = "Application chip restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
+            message = "Application restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
             if updatingAll, !allQueue.isEmpty, let want = latestApplication?.version {
-                // The controller goes next, once the application chip is back and
+                // The controller goes next, once the application is back and
                 // reports the new version (the app re-reads it every few seconds).
                 waitingForApplication = want
                 applicationSentAt = Date()
-                message = "Application chip restarting on \(want). The controller goes next, once the application chip is back (about 30 s)…"
+                message = "Application restarting on \(want). The controller goes next, once the application is back (about 30 s)…"
                 waitTimer?.invalidate()
                 waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
                     guard let self, self.waitingForApplication != nil else { return }
                     self.stopAll()
-                    self.message = "The application chip didn't come back on \(want) within 3 minutes, so the controller wasn't updated. If it went back to the old version, its update didn't keep; check again and retry."
+                    self.message = "The application didn't come back on \(want) within 3 minutes, so the controller wasn't updated. If it went back to the old version, its update didn't keep; check again and retry."
                 }
             } else {
                 stopAll()

@@ -198,7 +198,7 @@ final class Relay: NSObject, ObservableObject {
             }
         }
         peripheral?.readRSSI()
-        // The application chip's version and serial reach the Info text a little
+        // The application's version and serial reach the Info text a little
         // after connecting, so read it again now and then.
         ticks += 1
         if ticks % 20 == 0, let p = peripheral, let c = infoChar {

@@ -24,7 +24,7 @@ is described in that repo's `docs/ble-test-service.md`.
 - The screen stays on while connected.
 - **Firmware**: what each chip runs, the newest release on nRF Cloud
   (Check for updates), and an Update button per chip. The controller
-  takes about a minute and a half, the application chip about a minute. Each chip
+  takes about a minute and a half, the application about a minute. Each chip
   boots the new firmware on trial and goes back to the old one unless it
   works, so an interrupted update is harmless.
 
