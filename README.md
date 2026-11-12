@@ -83,6 +83,9 @@ get a fresh one.
 ## How it's built
 
 - `RelayTest/`: the app (SwiftUI and CoreBluetooth, iOS 17 or later).
+  - `Compass.swift`: compass calibration (turn the board a full circle, flat;
+    direction measured from the turn) and the corrected heading. Flat only, no tilt
+    compensation. Calibration is saved per board.
   - `Sensors.swift`: the sensor list (numbers match the firmware's
     `shared/link/sensors.hpp`) and how each value is shown.
   - `Relay.swift`: scanning, connecting, rates, and counting what arrives.
