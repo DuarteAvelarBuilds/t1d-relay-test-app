@@ -250,16 +250,19 @@ extension Relay: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        Log.ble.notice("t=\(Log.ms()) connected, max write \(peripheral.maximumWriteValueLength(for: .withoutResponse)) B")
         peripheral.discoverServices([Self.serviceUUID, Self.smpServiceUUID])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
+        Log.ble.notice("t=\(Log.ms()) connect failed: \(error?.localizedDescription ?? "unknown", privacy: .public)")
         reset("Couldn't connect: \(error?.localizedDescription ?? "unknown")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        Log.ble.notice("t=\(Log.ms()) disconnected: \(error?.localizedDescription ?? "by request", privacy: .public)")
         reset(error.map { "Connection lost: \($0.localizedDescription)" } ?? "Disconnected")
         // The relay restarts after a firmware update, or wanders out of range:
         // ask iOS to reconnect as soon as it's back (a pending connect never times out).
@@ -310,6 +313,7 @@ extension Relay: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
+        Log.ble.notice("t=\(Log.ms()) notify \(characteristic.uuid.uuidString, privacy: .public) on=\(characteristic.isNotifying) error=\(error?.localizedDescription ?? "none", privacy: .public)")
         if characteristic.uuid == Self.dataUUID && characteristic.isNotifying {
             status = .connected
             startAll()
@@ -318,6 +322,9 @@ extension Relay: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if let error {
+            Log.ble.notice("t=\(Log.ms()) value error on \(characteristic.uuid.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
         guard let data = characteristic.value else { return }
         switch characteristic.uuid {
         case Self.dataUUID:

@@ -282,6 +282,7 @@ final class Updater: ObservableObject {
                 tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
+                Log.update.notice("t=\(Log.ms()) start \(chip.rawValue, privacy: .public) \(rel.version, privacy: .public) size \(data.count)")
                 if chip == .controller { smpSend() } else { lteBegin() }
             } catch {
                 finish("Download failed: \(error.localizedDescription)")
@@ -305,6 +306,7 @@ final class Updater: ObservableObject {
     /// A transfer stalled: drop it and start it again from the beginning
     /// once the chips can talk again (at most twice per tap).
     private func retryLater(_ chip: Chip, _ why: String) {
+        Log.update.notice("t=\(Log.ms()) stall \(chip.rawValue, privacy: .public) at \(self.acked): \(why, privacy: .public) (auto retry \(self.autoRetries))")
         timer?.invalidate()
         timer = nil
         outbox.removeAll()
@@ -328,6 +330,7 @@ final class Updater: ObservableObject {
     }
 
     private func finish(_ text: String) {
+        Log.update.notice("t=\(Log.ms()) finish: \(text, privacy: .public)")
         stopAll()
         resumeChip = nil
         resumeTimer?.invalidate()
@@ -343,6 +346,7 @@ final class Updater: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             guard let self, self.busy != nil else { return }
             self.tries += 1
+            Log.update.notice("t=\(Log.ms()) timer fired after \(seconds, format: .fixed(precision: 1)) s: try \(self.tries) of \(limit), acked \(self.acked), window from \(self.windowSentFrom ?? -1), outbox \(self.outbox.count)")
             if self.tries > limit {
                 let who = self.busy == .application ? "the application chip (through the controller)" : "the controller"
                 self.retryLater(self.busy!, "No answer from \(who).")
@@ -402,6 +406,7 @@ final class Updater: ObservableObject {
         guard let off = fields["off"] else { return }
         acked = Int(off)
         tries = 0
+        Log.update.notice("t=\(Log.ms()) smp ack \(off)")
         showProgress()
         if acked >= image.count {
             timer?.invalidate()
@@ -428,6 +433,7 @@ final class Updater: ObservableObject {
         if tries == 0 {
             message = "Asking the application chip to get ready (it makes room for the update)…"
         }
+        Log.update.notice("t=\(Log.ms()) send begin 0x10 size \(self.image.count) try \(self.tries)")
         write([0x10] + le32(UInt32(image.count)))
         arm(3) { [weak self] in self?.lteBegin() }
     }
@@ -435,6 +441,7 @@ final class Updater: ObservableObject {
     private func lteSendWindow() {
         let end = min(acked + Self.window, image.count)
         windowSentFrom = acked
+        Log.update.notice("t=\(Log.ms()) send window \(self.acked)..<\(end) try \(self.tries)")
         var off = acked
         while off < end {
             let n = min(Self.piece, end - off)
@@ -448,17 +455,27 @@ final class Updater: ObservableObject {
     }
 
     func updateNotification(_ data: Data) {
-        guard busy == .application, data.count >= 5 else { return }
+        let raw = Log.hex(data)
+        guard busy == .application, data.count >= 5 else {
+            Log.update.notice("t=\(Log.ms()) notify \(raw, privacy: .public) IGNORED (\(self.busy == .application ? "too short" : "no application update running", privacy: .public))")
+            return
+        }
         let b = [UInt8](data)
         let v = UInt32(b[1]) | UInt32(b[2]) << 8 | UInt32(b[3]) << 16 | UInt32(b[4]) << 24
         if b[0] == 0x21 {
+            Log.update.notice("t=\(Log.ms()) notify \(raw, privacy: .public) ERROR \(Int32(bitPattern: v))")
             finish("The application chip refused the image (error \(Int32(bitPattern: v))).")
             return
         }
-        guard b[0] == 0x20 else { return }
+        guard b[0] == 0x20 else {
+            Log.update.notice("t=\(Log.ms()) notify \(raw, privacy: .public) IGNORED (unknown type)")
+            return
+        }
         if let from = windowSentFrom, Int(v) <= from {
+            Log.update.notice("t=\(Log.ms()) notify ack \(v) IGNORED (stale, window from \(from))")
             return // duplicate or stale: the retry timer covers a real loss
         }
+        Log.update.notice("t=\(Log.ms()) notify ack \(v) ACCEPTED (window from \(self.windowSentFrom ?? -1), tries \(self.tries))")
         acked = Int(v)
         tries = 0
         showProgress()
@@ -505,6 +522,9 @@ final class Updater: ObservableObject {
         while let next = outbox.first, p.canSendWriteWithoutResponse {
             p.writeValue(next.0, for: next.1, type: .withoutResponse)
             outbox.removeFirst()
+        }
+        if !outbox.isEmpty {
+            Log.update.notice("t=\(Log.ms()) outbox waiting for iOS room: \(self.outbox.count) queued")
         }
     }
 
