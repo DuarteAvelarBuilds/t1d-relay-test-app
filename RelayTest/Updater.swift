@@ -290,7 +290,7 @@ final class Updater: ObservableObject {
                 tries = 0
                 started = Date()
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
-                Log.update.notice("t=\(Log.ms()) start \(chip.rawValue, privacy: .public) \(rel.version, privacy: .public) size \(data.count)")
+                Log.update.notice("t=\(Log.ms()) start \(chip.rawValue, privacy: .public) \(rel.version, privacy: .public) size \(data.count) max write \(self.peripheral?.maximumWriteValueLength(for: .withoutResponse) ?? -1) B")
                 if chip == .controller { smpSend() } else { lteBegin() }
             } catch {
                 finish("Download failed: \(error.localizedDescription)")

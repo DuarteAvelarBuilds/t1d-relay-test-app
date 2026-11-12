@@ -250,7 +250,8 @@ extension Relay: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Log.ble.notice("t=\(Log.ms()) connected, max write \(peripheral.maximumWriteValueLength(for: .withoutResponse)) B")
+        // Before the MTU exchange, so this is often the 20 B default; "start" logs it again.
+        Log.ble.notice("t=\(Log.ms()) connected, max write \(peripheral.maximumWriteValueLength(for: .withoutResponse)) B (before MTU exchange)")
         peripheral.discoverServices([Self.serviceUUID, Self.smpServiceUUID])
     }
 
