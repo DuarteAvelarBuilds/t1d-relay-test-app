@@ -229,12 +229,12 @@ struct PartCard: View {
                 if let latest {
                     if current {
                         Button { onUpdate(.part(chip, .a)) } label: {
-                            Text("Reinstall \(latest.version)").frame(maxWidth: .infinity, minHeight: 34)
+                            Text("Reinstall \(latest.version)").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                     } else {
                         Button { onUpdate(.part(chip, .a)) } label: {
-                            Text("Update to \(latest.version)").frame(maxWidth: .infinity, minHeight: 34)
+                            Text("Update to \(latest.version)").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -243,19 +243,19 @@ struct PartCard: View {
                             Button("Install test copy \(o.release.version)") { onUpdate(.part(chip, o.copy)) }
                         } label: {
                             Image(systemName: "ellipsis")
-                                .frame(width: 34, height: 34)
+                                .frame(width: 24, height: 22)
                         }
                         .buttonStyle(.bordered)
                         .accessibilityLabel("More options for \(chip.rawValue)")
                     }
                 } else {
                     Button { updater.check() } label: {
-                        Text("Check for updates").frame(maxWidth: .infinity, minHeight: 34)
+                        Text("Check for updates").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                 }
             }
-            .controlSize(.large)
+            .controlSize(.regular)
             .disabled(updater.isUpdating)
             Text(route).font(.footnote).foregroundStyle(.secondary)
         }
@@ -347,7 +347,7 @@ struct RouteSheet: View {
                         dismiss()
                     } label: {
                         Text("\(reinstall && !all ? "Reinstall" : "Update") over \(route == .lte ? "LTE" : "Bluetooth")")
-                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
