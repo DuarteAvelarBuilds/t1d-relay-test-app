@@ -40,11 +40,28 @@ final class Updater: ObservableObject {
     }
     @Published var lte = LteStatus()
     var lteBusy: Bool { [.looking, .downloading, .installing].contains(lte.state) }
+    /// An application update over LTE is under way (not just a look-up).
+    @Published var lteUpdate = false
+    /// What the user asked of the LTE route (1 install, 2 reinstall), carried
+    /// out as soon as the relay's look-up answers.
+    private var lteIntent: UInt8?
 
-    /// 0 = look up the newest release and its size, 1 = download and install.
+    /// Which way the update now running (or last asked for) goes.
+    enum Route { case bluetooth, lte }
+
+    /// The relay's LTE status goes back to idle (a new connection, or an update ended).
+    func resetLte() {
+        lte = LteStatus()
+        lteUpdate = false
+        lteIntent = nil
+    }
+
+    /// 0 = look up the newest release and its size, 1 = download and install,
+    /// 2 = install the same version again.
     func lteRequest(_ cmd: UInt8) {
         guard let p = peripheral, let c = control else { return }
         if cmd == 0 { lte = LteStatus(state: .looking) }
+        else { lte = LteStatus(state: .downloading, value: 0, size: lte.size, version: lte.version) }
         p.writeValue(Data([4, cmd]), for: c, type: .withResponse)
         Log.update.notice("t=\(Log.ms()) LTE update request \(cmd)")
     }
@@ -55,6 +72,86 @@ final class Updater: ObservableObject {
         lte = LteStatus(state: s, value: Int(v[1]), size: Int(v[2]),
                         version: code == 0 ? "" : "\(code / 10000).\(code / 100 % 100).\(code % 100)")
         Log.update.notice("t=\(Log.ms()) LTE update state \(v[0]) value \(v[1]) size \(v[2]) version \(self.lte.version, privacy: .public)")
+        // An update asked for from the sheet: the look-up has answered, go on.
+        if let intent = lteIntent {
+            switch s {
+            case .found:
+                lteIntent = nil
+                lteRequest(1)
+                return
+            case .newest:
+                lteIntent = nil
+                if intent == 2 && lte.size > 0 {
+                    lteRequest(2)
+                    return
+                }
+                lteUpdate = false
+                message = "The relay says the application is already the newest release."
+            case .failed:
+                lteIntent = nil
+            default:
+                return
+            }
+        }
+        if s == .failed || s == .idle { lteUpdate = false }
+        // The application is the last of "update all": nothing follows.
+        if updatingAll, allQueue.isEmpty, lteIntent == nil, [.installing, .failed, .newest].contains(s) {
+            stopAll()
+        }
+    }
+
+    /// An update is under way, or waiting to go on: the Firmware screen shows its progress.
+    var isUpdating: Bool { busy != nil || resumeChip != nil || updatingAll || lteUpdate }
+    /// The controller has its image and is restarting; the application is next.
+    var waitingForRestart: Bool { waitingForController != nil }
+    /// The chip the update now shown is about.
+    var activeChip: Chip? {
+        if lteUpdate { return .application }
+        return busy ?? resumeChip ?? (updatingAll ? allQueue.first : nil)
+    }
+
+    /// Application version 0.5.12 or later can update itself over LTE.
+    var lteCapable: Bool {
+        let core = applicationVersion.split(separator: "-").first.map(String.init) ?? ""
+        let n = core.split(separator: ".").compactMap { Int($0) }
+        guard n.count == 3 else { return false }
+        return (n[0], n[1], n[2]) >= (0, 5, 12)
+    }
+
+    /// Update (or reinstall) the application over the relay's own LTE
+    /// connection: look up the newest release, then download and install it.
+    func startApplicationOverLTE(reinstall: Bool) {
+        guard busy == nil, !lteBusy, peripheral != nil, control != nil else { return }
+        route = .lte
+        lteUpdate = true
+        lteIntent = reinstall ? 2 : 1
+        message = ""
+        lteRequest(0)
+    }
+
+    /// What an Update button does once the way is known. The controller, and
+    /// test copies, only go over Bluetooth; the application can go either way.
+    func run(_ target: UpdatePlan.Target, route: Route) {
+        switch target {
+        case .part(let chip, let copy):
+            if chip == .application && copy == .a && route == .lte {
+                startApplicationOverLTE(reinstall: Self.sameVersion(applicationVersion, latestApplication?.version ?? ""))
+            } else {
+                start(chip, copy)
+            }
+        case .all(let copy):
+            updateAll(copy, route: route)
+        }
+    }
+
+    /// Whether the user has a choice to make: only the application's own
+    /// newest release can come over LTE.
+    func needsRouteChoice(_ target: UpdatePlan.Target) -> Bool {
+        guard lteCapable else { return false }
+        switch target {
+        case .part(let chip, let copy): return chip == .application && copy == .a
+        case .all(let copy): return copy == .a
+        }
     }
 
     @Published var controllerVersion = "?"
@@ -78,8 +175,18 @@ final class Updater: ObservableObject {
     @Published var latestApplicationB: Release?
     enum Copy { case a, b }
     /// Which copy the update now running (or about to) installs.
-    private var wanted: Copy = .a
+    private(set) var wanted: Copy = .a
     @Published var checked = false
+    @Published var lastChecked: Date?
+    @Published var route = Route.bluetooth
+    /// True once the image is downloaded and being sent to the board.
+    @Published var sending = false
+    /// The counters the controller reports: bad lines / dropped, transfer
+    /// dropped / late, answers in / sent / error. Slash-joined as sent.
+    @Published var badCounts = "?"
+    @Published var transferCounts = "?"
+    @Published var answerCounts = "?"
+    @Published var chipLink = "?"
     @Published var busy: Chip?
     @Published var progress = 0.0
     @Published var message = ""
@@ -117,17 +224,16 @@ final class Updater: ObservableObject {
     private var outbox: [(Data, CBCharacteristic)] = []
     private var started = Date()
 
-    /// "Update all": chips still to do, LTE first (the phone stays connected
-    /// while it restarts), the controller last (its restart drops the link).
+    /// "Update all": chips still to do, the controller first, then the
+    /// application (over Bluetooth or LTE, as asked).
     @Published var updatingAll = false
     private var allQueue: [Chip] = []
     private var allCopy: Copy = .a
-    /// After the application's update: the version to see before going on.
-    private var waitingForApplication: String?
-    /// When the application got its image. A reinstall keeps the same version,
-    /// so the version alone can't show it has restarted: wait at least 15 s
-    /// and for the controller to hear it again.
-    private var applicationSentAt = Date.distantPast
+    private var allRoute = Route.bluetooth
+    /// After the controller's update: the version to see before the
+    /// application goes next (its restart drops the Bluetooth link).
+    private var waitingForController: String?
+    private var controllerSentAt = Date.distantPast
     private var waitTimer: Timer?
     /// After a stall: the chip to update again once the chips can talk again
     /// (the stuck chip restarts itself, the app reconnects).
@@ -157,21 +263,27 @@ final class Updater: ObservableObject {
             latestControllerB = nil
             latestApplicationB = nil
             checked = false
+            lastChecked = nil
         }
         board = newBoard
         serial = newSerial
         heard = after("heard").flatMap { Int($0) }
+        chipLink = after("link") ?? "?"
+        badCounts = after("bad") ?? "?"
+        transferCounts = after("upd") ?? "?"
+        answerCounts = after("ans") ?? "?"
+        if let want = waitingForController, Self.sameVersion(controllerVersion, want),
+           Date().timeIntervalSince(controllerSentAt) > 15, busy == nil, linkOK,
+           peripheral != nil, update != nil {
+            waitingForController = nil
+            waitTimer?.invalidate()
+            startNextOfAll()
+        }
         if let c = resumeChip, busy == nil, linkOK, peripheral != nil,
            (c == .controller ? smp : update) != nil {
             resumeChip = nil
             resumeTimer?.invalidate()
             begin(c)
-        }
-        if let want = waitingForApplication, Self.sameVersion(applicationVersion, want),
-           Date().timeIntervalSince(applicationSentAt) > 15, (heard ?? 0) <= 10 {
-            waitingForApplication = nil
-            waitTimer?.invalidate()
-            startNextOfAll()
         }
     }
 
@@ -222,20 +334,21 @@ final class Updater: ObservableObject {
 
     // MARK: Update all
 
-    func updateAll(_ copy: Copy = .a) {
-        guard busy == nil, !updatingAll else { return }
+    func updateAll(_ copy: Copy = .a, route: Route = .bluetooth) {
+        guard busy == nil, !updatingAll, !lteBusy else { return }
         guard release(.application, copy) != nil, release(.controller, copy) != nil else {
             message = "That copy isn't published for this board."
             return
         }
         allCopy = copy
-        // Both chips every time, LTE first: an update where either is
+        allRoute = route
+        // Both chips every time, controller first: an update where either is
         // behind, a reinstall of both when they're current.
         guard checked else {
             message = "Check for updates first."
             return
         }
-        allQueue = [.application, .controller]
+        allQueue = [.controller, .application]
         updatingAll = true
         startNextOfAll()
     }
@@ -246,7 +359,13 @@ final class Updater: ObservableObject {
             updatingAll = false
             return
         }
-        start(allQueue.removeFirst(), allCopy)
+        let next = allQueue.removeFirst()
+        if next == .application && allRoute == .lte && allCopy == .a {
+            startApplicationOverLTE(reinstall: Self.sameVersion(applicationVersion, release(.application, .a)?.version ?? ""))
+            if !lteUpdate { stopAll() } // couldn't begin
+            return
+        }
+        start(next, allCopy)
         if busy == nil && resumeChip == nil {
             stopAll() // start() couldn't begin and said why in `message`
         }
@@ -255,7 +374,7 @@ final class Updater: ObservableObject {
     private func stopAll() {
         updatingAll = false
         allQueue = []
-        waitingForApplication = nil
+        waitingForController = nil
         waitTimer?.invalidate()
         waitTimer = nil
     }
@@ -282,6 +401,7 @@ final class Updater: ObservableObject {
                 latestControllerB = try? await latest(type: "controller", hardware: hardwareVersion + "-b")
                 latestApplicationB = try? await latest(type: "app", hardware: hardwareVersion + "-b")
                 checked = true
+                lastChecked = Date()
                 message = ""
             } catch {
                 message = "Couldn't check: \(error.localizedDescription)"
@@ -338,6 +458,7 @@ final class Updater: ObservableObject {
     func start(_ chip: Chip, _ copy: Copy = .a) {
         guard busy == nil else { return }
         wanted = copy
+        route = .bluetooth
         autoRetries = 0
         resumeChip = nil
         if chip == .application && !linkOK {
@@ -357,6 +478,7 @@ final class Updater: ObservableObject {
         }
         busy = chip
         progress = 0
+        sending = false
         message = "Downloading \(chip.rawValue) \(rel.version)…"
         stopStreams()
         Task { @MainActor in
@@ -368,6 +490,7 @@ final class Updater: ObservableObject {
                 roundTrip = 0.8
                 tries = 0
                 started = Date()
+                sending = true
                 message = "Sending \(chip.rawValue) \(rel.version) (\(data.count / 1024) KB)…"
                 Log.update.notice("t=\(Log.ms()) start \(chip.rawValue, privacy: .public) \(rel.version, privacy: .public) size \(data.count) max write \(self.peripheral?.maximumWriteValueLength(for: .withoutResponse) ?? -1) B")
                 if chip == .controller { smpSend() } else { lteBegin() }
@@ -379,9 +502,9 @@ final class Updater: ObservableObject {
 
     /// From Relay when the Bluetooth connection ends.
     func connectionLost(userAsked: Bool) {
-        if lte.state != .installing { lte = LteStatus() }
+        if lte.state != .installing && !lteUpdate { resetLte() }
         if userAsked {
-            if busy != nil || resumeChip != nil {
+            if busy != nil || resumeChip != nil || updatingAll {
                 finish("Stopped: you disconnected. Nothing was installed.")
             }
             return
@@ -426,6 +549,9 @@ final class Updater: ObservableObject {
         timer?.invalidate()
         timer = nil
         busy = nil
+        sending = false
+        lteUpdate = false
+        lteIntent = nil
         message = text
         resumeStreams()
     }
@@ -504,10 +630,22 @@ final class Updater: ObservableObject {
                 p.writeValue(Data([3]), for: c, type: .withResponse)
             }
             busy = nil
-            message = updatingAll
-                ? "Both chips updated. The controller is restarting now; the app reconnects by itself in about 30 s, and each chip keeps its update after a minute of working."
-                : "Controller restarting on the new firmware. The app reconnects by itself in about 30 s; it keeps the update once it's talked to the application for a minute."
-            stopAll()
+            sending = false
+            if updatingAll, !allQueue.isEmpty, let want = release(.controller, allCopy)?.version {
+                // The application goes next, once the controller is back.
+                waitingForController = want
+                controllerSentAt = Date()
+                message = "Controller restarting on \(want). The application goes next, once the app has reconnected (about 30 s)…"
+                waitTimer?.invalidate()
+                waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
+                    guard let self, self.waitingForController != nil else { return }
+                    self.stopAll()
+                    self.message = "The controller didn't come back on \(want) within 3 minutes, so the application wasn't updated. Check the board and try again."
+                }
+            } else {
+                message = "Controller restarting on the new firmware. The app reconnects by itself in about 30 s; it keeps the update once it's talked to the application for a minute."
+                stopAll()
+            }
         } else {
             smpSend()
         }
@@ -579,23 +717,10 @@ final class Updater: ObservableObject {
             timer?.invalidate()
             write([0x12])
             busy = nil
+            sending = false
             autoRetries = 0
             message = "Application restarting on the new firmware. It keeps it once it's on LTE for a minute; reconnect to see the new version."
-            if updatingAll, !allQueue.isEmpty, let want = release(.application, allCopy)?.version {
-                // The controller goes next, once the application is back and
-                // reports the new version (the app re-reads it every few seconds).
-                waitingForApplication = want
-                applicationSentAt = Date()
-                message = "Application restarting on \(want). The controller goes next, once the application is back (about 30 s)…"
-                waitTimer?.invalidate()
-                waitTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
-                    guard let self, self.waitingForApplication != nil else { return }
-                    self.stopAll()
-                    self.message = "The application didn't come back on \(want) within 3 minutes, so the controller wasn't updated. If it went back to the old version, its update didn't keep; check again and retry."
-                }
-            } else {
-                stopAll()
-            }
+            stopAll() // the application is the last of "update all"
         } else {
             lteSendWindow()
         }

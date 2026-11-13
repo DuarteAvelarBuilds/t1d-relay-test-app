@@ -79,8 +79,11 @@ reuses that setup's org secrets and certificate repo.
 ```
 RelayTest/
   RelayTestApp.swift   @main, one WindowGroup
-  ContentView.swift    SwiftUI screens: status, relays nearby, connected device,
-                       FirmwareSection, sensor rows (toggle, rate menu, graph)
+  ContentView.swift    SwiftUI screens: relays nearby, main screen (Firmware row,
+                       sensor rows with toggle, rate menu, graph)
+  FirmwareView.swift   Firmware screen (one card per part, Update buttons), the
+                       "choose how" sheet, update progress, Board details
+  TopBar.swift         the top bar on every screen: Bluetooth and LTE signal bars
   Relay.swift          CoreBluetooth central: scan, connect, discover, notifications,
                        rate writes, per-sensor counting, auto-reconnect
   Sensors.swift        sensor table (IDs match firmware shared/link/sensors.hpp),

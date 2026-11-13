@@ -164,7 +164,7 @@ final class Relay: NSObject, ObservableObject {
 
     private func startAll() {
         live = [:]
-        if updater.lte.state == .installing { updater.lte = Updater.LteStatus() }
+        if updater.lte.state == .installing { updater.resetLte() }
         for row in rows where row.enabled {
             sendRate(row.id, row.interval)
         }
