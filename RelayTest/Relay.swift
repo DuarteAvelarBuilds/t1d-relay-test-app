@@ -55,6 +55,8 @@ final class Relay: NSObject, ObservableObject {
     private var refresh: Timer?
     /// The user tapped Disconnect, so don't reconnect by ourselves.
     private var userDisconnected = false
+    /// The relay to connect to as soon as the current one has let go.
+    private var pendingSwitch: Found?
     private var ticks = 0
 
     /// Raw per-sensor state, updated on every notification (not published).
@@ -111,6 +113,25 @@ final class Relay: NSObject, ObservableObject {
         status = .connecting
         userDisconnected = false
         central.connect(f.peripheral)
+    }
+
+    /// Looking for other relays while this one stays connected (the device picker).
+    func scanNearby() {
+        guard central.state == .poweredOn else { return }
+        found = []
+        central.scanForPeripherals(withServices: nil,
+                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+    }
+
+    func stopNearbyScan() {
+        if status == .connected { central.stopScan() }
+    }
+
+    /// Leave this relay and connect to another one.
+    func switchTo(_ f: Found) {
+        central.stopScan()
+        pendingSwitch = f
+        disconnect()
     }
 
     func disconnect() {
@@ -306,6 +327,11 @@ extension Relay: CBCentralManagerDelegate {
                         error: Error?) {
         Log.ble.notice("t=\(Log.ms()) disconnected: \(error?.localizedDescription ?? "by request", privacy: .public)")
         reset(error.map { "Connection lost: \($0.localizedDescription)" } ?? "Disconnected")
+        if let next = pendingSwitch {
+            pendingSwitch = nil
+            connect(next)
+            return
+        }
         // The relay restarts after a firmware update, or wanders out of range:
         // ask iOS to reconnect as soon as it's back (a pending connect never times out).
         if !userDisconnected {
