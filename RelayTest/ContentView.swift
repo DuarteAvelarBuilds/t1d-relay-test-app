@@ -333,6 +333,11 @@ struct LteUpdateRows: View {
                 Label("Asking the cloud, over the relay's LTE…", systemImage: "antenna.radiowaves.left.and.right")
             case .newest:
                 Text("Over LTE: the application is already the newest release.")
+                if s.size > 0 {
+                    Button("Reinstall \(s.version) over LTE (\(megabytes(s.size)))") { updater.lteRequest(2) }
+                        .buttonStyle(.bordered)
+                        .disabled(updater.busy != nil || updater.updatingAll)
+                }
             case .found:
                 Text("Over LTE: newest application is \(s.version), \(megabytes(s.size)) to download.")
                 Button("Download and install \(s.version) over LTE (\(megabytes(s.size)))") { updater.lteRequest(1) }
