@@ -2,17 +2,30 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var relay = Relay()
+    /// Pushed screens. Kept here, not in the sensor list, so an update that
+    /// restarts the board (and drops the connection for a moment) leaves you
+    /// on the Firmware screen when it comes back.
+    @State private var path: [Screen] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if relay.status == .connected {
                     SensorList(relay: relay)
+                        .relayBar(relay.updater.boardDef.name, relay: relay) {
+                            Button("Disconnect", role: .destructive) { relay.disconnect() }
+                        }
                 } else {
                     DeviceList(relay: relay)
+                        .navigationTitle("Relay Test")
                 }
             }
-            .navigationTitle("Relay Test")
+            .navigationDestination(for: Screen.self) { screen in
+                switch screen {
+                case .firmware: FirmwareScreen(relay: relay)
+                case .details: BoardDetailsScreen(relay: relay)
+                }
+            }
         }
         .onChange(of: relay.status) { _, s in
             // Keep the screen on while connected, so the test isn't cut short.
@@ -72,90 +85,45 @@ struct DeviceList: View {
 
 struct SensorList: View {
     @ObservedObject var relay: Relay
+    @ObservedObject var updater: Updater
+
+    init(relay: Relay) {
+        self.relay = relay
+        _updater = ObservedObject(wrappedValue: relay.updater)
+    }
 
     var body: some View {
         List {
             Section {
-                Text(relay.updater.boardDef.name).font(.headline)
-                HStack {
-                    Text(relay.info.isEmpty ? "Connected" : relay.info)
-                    Spacer()
-                    if let r = relay.linkRssi {
-                        Text("Bluetooth \(r) dBm").foregroundStyle(.secondary).monospacedDigit()
+                NavigationLink(value: Screen.firmware) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Firmware").font(.headline)
+                        if updater.isUpdating {
+                            Text("Updating…").font(.footnote).foregroundStyle(.blue)
+                        } else if updater.outdated.count > 0 {
+                            Text(updater.outdated.count == 1 ? "1 update available" : "\(updater.outdated.count) updates available")
+                                .font(.footnote).foregroundStyle(.orange)
+                        } else if updater.checked {
+                            Text("Up to date").font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            Text(updater.applicationVersion == "?" ? "" : "application \(updater.applicationVersion), controller \(updater.controllerVersion)")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 }
-                .font(.footnote)
-                LteSignalRow(rsrp: relay.lteRsrp, lteOn: relay.rows.first(where: { $0.id == 6 })?.enabled ?? false)
-                Button("Disconnect", role: .destructive) { relay.disconnect() }
             }
-            FirmwareSection(updater: relay.updater)
-            Section("Sensors") {
-                ForEach(relay.rows) { row in
+            Section {
+                // The LTE signal is the connection indicator, shown in the top
+                // bar; its polling rate is in Board details.
+                ForEach(relay.rows.filter { $0.id != Relay.signalSensor }) { row in
                     if let def = Sensors.all.first(where: { $0.id == row.id }) {
                         SensorCell(def: def, row: row, relay: relay)
                     }
                 }
-            }
-        }
-    }
-}
-
-/// Firmware versions on the board, what nRF Cloud has, and the Update buttons.
-struct FirmwareSection: View {
-    @ObservedObject var updater: Updater
-
-    var body: some View {
-        Section("Firmware") {
-            row(.controller, updater.controllerVersion, updater.latestController)
-            row(.application, updater.applicationVersion, updater.latestApplication)
-            if updater.busy != nil || updater.updatingAll {
-                ProgressView(value: updater.progress)
-            }
-            if let link = updater.linkText {
-                Text(link).font(.footnote).foregroundStyle(updater.linkOK ? Color.secondary : Color.orange)
-            }
-            if !updater.message.isEmpty {
-                Text(updater.message).font(.footnote).foregroundStyle(.secondary)
-            }
-            if let note = updater.boardDef.updates.note {
-                Text("\(updater.boardDef.name): \(note)")
-                    .font(.footnote).foregroundStyle(.orange)
-            }
-            if updater.checked && updater.latestApplication != nil && updater.latestController != nil {
-                Button(updater.outdated.isEmpty ? "Reinstall all" : "Update all") { updater.updateAll(.a) }
-                    .disabled(updater.busy != nil || updater.updatingAll)
-            }
-            if updater.checked, let a = updater.other(.application), let c = updater.other(.controller),
-               a.copy == c.copy {
-                Button("Switch both to \(a.release.version) / \(c.release.version)") { updater.updateAll(a.copy) }
-                    .disabled(updater.busy != nil || updater.updatingAll)
-            }
-            Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
-                .disabled(updater.busy != nil || updater.updatingAll)
-            LteUpdateRows(updater: updater)
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ chip: Updater.Chip, _ running: String, _ latest: Updater.Release?) -> some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(chip.rawValue)
-                Text(latest.map { "running \(running) · newest \($0.version)" } ?? "running \(running)")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let latest {
-                VStack(alignment: .trailing) {
-                    Button(Updater.sameVersion(running, latest.version) ? "Reinstall" : "Update") { updater.start(chip) }
-                        .buttonStyle(.bordered)
-                        .disabled(updater.busy != nil || updater.updatingAll)
-                    if let o = updater.other(chip) {
-                        Button("Install \(o.release.version)") { updater.start(chip, o.copy) }
-                            .buttonStyle(.bordered)
-                            .disabled(updater.busy != nil || updater.updatingAll)
-                    }
-                }
+            } header: {
+                Text("Sensors")
+            } footer: {
+                Text("LTE signal is always on. Change how often it polls in Board details.")
             }
         }
     }
@@ -278,87 +246,6 @@ struct Sparkline: View {
                 }
             }
             .stroke(Color.accentColor, lineWidth: 1.5)
-        }
-    }
-}
-
-/// How strong the relay's LTE signal is, as bars (RSRP, the usual cellular measure).
-struct LteSignalRow: View {
-    let rsrp: Int?
-    let lteOn: Bool
-
-    /// 0 none ... 1 poor (below -115 dBm), 2 fair, 3 good, 4 excellent (above -90 dBm).
-    static func bars(_ rsrp: Int) -> Int {
-        switch rsrp {
-        case (-90)...: return 4
-        case (-105)...: return 3
-        case (-115)...: return 2
-        default: return 1
-        }
-    }
-
-    static func word(_ bars: Int) -> String {
-        ["no signal", "poor", "fair", "good", "excellent"][bars]
-    }
-
-    var body: some View {
-        HStack {
-            Image(systemName: "cellularbars", variableValue: Double(rsrp.map(Self.bars) ?? 0) / 4)
-                .foregroundStyle(rsrp == nil ? Color.secondary : Color.primary)
-            if let r = rsrp {
-                Text("LTE \(Self.word(Self.bars(r))) · \(r) dBm")
-            } else {
-                Text(lteOn ? "LTE: no signal yet" : "LTE signal: turn the LTE sensor on")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .font(.footnote)
-    }
-}
-
-/// Update the application over the relay's own LTE connection (no phone data,
-/// but it uses the relay's SIM: about 0.3 MB). Always asks first.
-struct LteUpdateRows: View {
-    @ObservedObject var updater: Updater
-
-    private func megabytes(_ bytes: Int) -> String { String(format: "%.2f MB", Double(bytes) / 1_000_000) }
-
-    var body: some View {
-        let s = updater.lte
-        Group {
-            switch s.state {
-            case .idle:
-                EmptyView()
-            case .looking:
-                Label("Asking the cloud, over the relay's LTE…", systemImage: "antenna.radiowaves.left.and.right")
-            case .newest:
-                Text("Over LTE: the application is already the newest release.")
-                if s.size > 0 {
-                    Button("Reinstall \(s.version) over LTE (\(megabytes(s.size)))") { updater.lteRequest(2) }
-                        .buttonStyle(.bordered)
-                        .disabled(updater.busy != nil || updater.updatingAll)
-                }
-            case .found:
-                Text("Over LTE: newest application is \(s.version), \(megabytes(s.size)) to download.")
-                Button("Download and install \(s.version) over LTE (\(megabytes(s.size)))") { updater.lteRequest(1) }
-                    .buttonStyle(.bordered)
-                    .disabled(updater.busy != nil || updater.updatingAll)
-            case .downloading:
-                ProgressView(value: Double(s.value) / 100) {
-                    Text("Downloading \(s.version) over LTE… \(s.value) %")
-                }
-            case .installing:
-                Text("Downloaded. The application restarts on the new version; reconnect to check it.")
-            case .failed:
-                Text("The LTE update didn't work (error \(s.value)). Nothing was installed.")
-                    .foregroundStyle(.orange)
-            }
-        }
-        .font(.footnote)
-        if !updater.lteBusy {
-            Button("Check over LTE (needs application 0.5.12)") { updater.lteRequest(0) }
-                .disabled(updater.busy != nil || updater.updatingAll)
         }
     }
 }
