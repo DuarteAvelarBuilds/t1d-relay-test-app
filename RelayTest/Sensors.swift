@@ -108,7 +108,7 @@ enum Sensors {
             return xyz(v)
         case "gyro":
             guard v.count >= 3 else { return "?" }
-            return String(format: "x %+.0f  y %+.0f  z %+.0f °/s",
+            return String(format: "x %+6.0f  y %+6.0f  z %+6.0f °/s",
                           Double(v[0]) / 1000, Double(v[1]) / 1000, Double(v[2]) / 1000)
         case "compass":
             // Heading assumes the board lies flat; Earth's field is 25-65 µT,
@@ -121,19 +121,19 @@ enum Sensors {
             let point = points[Int((heading + 22.5) / 45) % 8]
             let field = (x * x + y * y + z * z).squareRoot()
             let strength = field > 100 ? " (strong: magnet nearby?)" : ""
-            return String(format: "Heading %.0f° %@ · field %.0f µT%@\nx %+.0f  y %+.0f  z %+.0f µT",
-                          heading, point, field, strength, x, y, z)
+            return String(format: "Heading %3.0f° %@ · field %3.0f µT%@\nx %+5.0f  y %+5.0f  z %+5.0f µT",
+                          heading, pad(point, 2), field, strength, x, y, z)
         case "environment":
             guard v.count >= 4 else { return "?" }
-            return String(format: "%.1f °C · %.0f%% RH · %.1f hPa · %.1f kΩ",
+            return String(format: "%5.1f °C · %3.0f%% RH · %6.1f hPa · %7.1f kΩ",
                           Double(v[0]) / 1000, Double(v[1]) / 1000,
                           Double(v[2]) / 100, Double(v[3]) / 1000)
         case "rgbir":
             guard v.count >= 4 else { return "?" }
-            return "R \(v[0])  G \(v[1])  B \(v[2])  IR \(v[3])"
+            return String(format: "R %5d  G %5d  B %5d  IR %5d", v[0], v[1], v[2], v[3])
         case "battery":
             guard v.count >= 2 else { return "?" }
-            let base = String(format: "%d%% · %.2f V", v[0], Double(v[1]) / 1000)
+            let base = String(format: "%3d%% · %.2f V", v[0], Double(v[1]) / 1000)
             guard v.count >= 3 else { return base }
             var text = base + " · " + charger(v[2])
             if v.count >= 4 && v[3] >= 0 {
@@ -142,13 +142,13 @@ enum Sensors {
             return text
         case "fuelgauge":
             guard v.count >= 4 else { return "?" }
-            var text = String(format: "%+.1f mA · %.1f °C",
+            var text = String(format: "%+8.1f mA · %5.1f °C",
                               Double(v[0]) / 1000, Double(v[1]) / 1000)
             if v[2] >= 0 { text += " · empty in " + duration(v[2]) }
             if v[3] >= 0 { text += " · full in " + duration(v[3]) }
             return text
         case "lte":
-            return v.first.map { $0 == 0 ? "no signal" : "\($0) dBm" } ?? "?"
+            return v.first.map { $0 == 0 ? "no signal" : String(format: "%4d dBm", $0) } ?? "?"
         case "g7":
             guard v.count >= 4 else { return "?" }
             let state = Int(v[0]) < g7States.count ? g7States[Int(v[0])] : "?"
@@ -156,7 +156,7 @@ enum Sensors {
             return "\(state)\(rssi) · \(v[2]) close · \(v[3]) heard"
         case "controllerstats":
             guard v.count >= 4 else { return "?" }
-            return "in \(v[0]) · bad \(v[1]) · dropped \(v[2]) · failed \(v[3])"
+            return String(format: "in %6d · bad %4d · dropped %4d · failed %4d", v[0], v[1], v[2], v[3])
         default:
             // A kind this app version doesn't know yet: show the raw numbers.
             return v.map(String.init).joined(separator: " ")
@@ -195,13 +195,18 @@ enum Sensors {
         }
     }
 
+    /// Pad to a width, so a value that changes length doesn't move what follows it.
+    static func pad(_ s: String, _ n: Int) -> String {
+        s.count >= n ? s : s + String(repeating: " ", count: n - s.count)
+    }
+
     static func duration(_ s: Int32) -> String {
         s >= 3600 ? String(format: "%d h %02d min", s / 3600, (s % 3600) / 60) : "\(s / 60) min"
     }
 
     static func xyz(_ v: [Int32]) -> String {
         guard v.count >= 3 else { return "?" }
-        return String(format: "x %+.2f  y %+.2f  z %+.2f g",
+        return String(format: "x %+6.2f  y %+6.2f  z %+6.2f g",
                       Double(v[0]) / 1000, Double(v[1]) / 1000, Double(v[2]) / 1000)
     }
 

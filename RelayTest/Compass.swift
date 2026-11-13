@@ -152,14 +152,14 @@ final class CompassModel: ObservableObject {
         guard v.count >= 3 else { return "?" }
         let x = Double(v[0]) / 1000, y = Double(v[1]) / 1000, z = Double(v[2]) / 1000
         let field = (x * x + y * y + z * z).squareRoot()
-        let rawLine = String(format: "raw x %+.0f  y %+.0f  z %+.0f µT · field %.0f µT", x, y, z, field)
+        let rawLine = String(format: "raw x %+5.0f  y %+5.0f  z %+5.0f µT · field %3.0f µT", x, y, z, field)
         guard let h = heading(v), let c = cal else {
             return "Not calibrated: tap Calibrate and turn the board a full circle.\n" + rawLine
         }
         let points = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         let point = points[Int((h + 22.5) / 45) % 8]
         let ref = c.northSet ? "" : " (from the +x edge: tap Set north to fix it)"
-        return String(format: "Heading %.0f° %@%@\n", h, point, ref) + rawLine
+        return String(format: "Heading %3.0f° %@%@\n", h, Sensors.pad(point, 2), ref) + rawLine
     }
 
     // MARK: Private

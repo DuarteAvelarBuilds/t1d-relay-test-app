@@ -6,6 +6,7 @@ struct ContentView: View {
     /// restarts the board (and drops the connection for a moment) leaves you
     /// on the Firmware screen when it comes back.
     @State private var path: [Screen] = []
+    @State private var pickDevice = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -14,6 +15,19 @@ struct ContentView: View {
                     SensorList(relay: relay)
                         .relayBar(relay.updater.boardDef.name, relay: relay) {
                             Button("Disconnect", role: .destructive) { relay.disconnect() }
+                        }
+                        .toolbar {
+                            // Tap the name to pick another relay.
+                            ToolbarItem(placement: .principal) {
+                                Button { pickDevice = true } label: {
+                                    HStack(spacing: 4) {
+                                        Text(relay.updater.boardDef.name).font(.headline)
+                                        Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(relay.updater.boardDef.name). Tap to pick another device.")
+                            }
                         }
                 } else {
                     DeviceList(relay: relay)
@@ -26,6 +40,10 @@ struct ContentView: View {
                 case .details: BoardDetailsScreen(relay: relay)
                 }
             }
+        }
+        .sheet(isPresented: $pickDevice) {
+            DevicePicker(relay: relay)
+                .presentationDetents([.medium, .large])
         }
         .onChange(of: relay.status) { _, s in
             // Keep the screen on while connected, so the test isn't cut short.
@@ -172,7 +190,7 @@ struct SensorCell: View {
                         Text("Asked: \(Sensors.rateLabel(row.interval))")
                     }
                     Spacer()
-                    Text(String(format: "Got %.1f/s", row.perSecond))
+                    Text(String(format: "Got %4.1f/s", row.perSecond))
                     if row.missed > 0 {
                         Text("· \(row.missed) missed").foregroundStyle(.orange)
                     }
@@ -255,5 +273,60 @@ struct Sparkline: View {
             }
             .stroke(Color.accentColor, lineWidth: 1.5)
         }
+    }
+}
+
+/// Pick another relay while connected: the one connected now stays until you tap another.
+struct DevicePicker: View {
+    @ObservedObject var relay: Relay
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Connected") {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(relay.updater.boardDef.name)
+                            if !relay.updater.serial.isEmpty {
+                                Text(relay.updater.serial).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark").foregroundStyle(.blue)
+                    }
+                }
+                Section("Other relays nearby") {
+                    if relay.found.isEmpty {
+                        Label("Looking…", systemImage: "antenna.radiowaves.left.and.right")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(relay.found) { f in
+                        Button {
+                            relay.switchTo(f)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(f.name)
+                                    if let b = Boards.fromAdvertisedName(f.name) {
+                                        Text(b.name).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text("\(f.rssi) dBm").foregroundStyle(.secondary).monospacedDigit()
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Pick a device")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+        }
+        .onAppear { relay.scanNearby() }
+        .onDisappear { relay.stopNearbyScan() }
     }
 }
