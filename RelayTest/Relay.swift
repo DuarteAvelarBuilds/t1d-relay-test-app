@@ -165,6 +165,7 @@ final class Relay: NSObject, ObservableObject {
     private func startAll() {
         live = [:]
         if updater.lte.state == .installing { updater.resetLte() }
+        if !updater.isUpdating { updater.message = "" } // an old result doesn't belong to the new connection
         for row in rows where row.enabled {
             sendRate(row.id, row.interval)
         }
