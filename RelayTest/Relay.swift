@@ -74,11 +74,18 @@ final class Relay: NSObject, ObservableObject {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
         updater.stopStreams = { [weak self] in self?.allOff() }
+        updater.resumeStreams = { [weak self] in self?.resumeStreams() }
     }
 
-    /// Every sensor off (during a firmware update).
+    /// The LTE signal (sensor 6) is the relay's connection indicator, so it
+    /// is never switched off: not by its toggle, not by an update. Only its
+    /// rate can be changed.
+    static let signalSensor: UInt8 = 6
+
+    /// Every sensor off (during a firmware update), except the LTE signal's
+    /// setting, which stays on so it comes back by itself afterwards.
     func allOff() {
-        for i in rows.indices { rows[i].enabled = false }
+        for i in rows.indices where rows[i].id != Self.signalSensor { rows[i].enabled = false }
         if let p = peripheral, let c = control {
             p.writeValue(Data([2]), for: c, type: .withResponse)
         }
@@ -113,7 +120,15 @@ final class Relay: NSObject, ObservableObject {
         }
     }
 
+    /// Ask the relay for every sensor that is on again (after an update ended
+    /// without a reconnect, or fell through).
+    func resumeStreams() {
+        guard status == .connected else { return }
+        for row in rows where row.enabled { sendRate(row.id, row.interval) }
+    }
+
     func setEnabled(_ id: UInt8, _ on: Bool) {
+        if id == Self.signalSensor && !on { return }
         guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
         rows[i].enabled = on
         sendRate(id, on ? rows[i].interval : 0)
