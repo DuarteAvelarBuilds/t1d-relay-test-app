@@ -112,18 +112,27 @@ struct FirmwareScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if updater.outdated.count == 2 {
+            if updater.checked && updater.latestApplication != nil && updater.latestController != nil {
+                let n = updater.outdated.count
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("2 updates available").font(.subheadline.weight(.semibold))
+                        Text(n == 0 ? "Everything is up to date" : (n == 1 ? "1 update available" : "2 updates available"))
+                            .font(.subheadline.weight(.semibold))
                         Text("Controller first, then application").font(.footnote).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Update all") { updater.ask(.all(.a), $plan) }
-                        .buttonStyle(.borderedProminent)
+                    if n == 0 {
+                        Button("Reinstall all") { updater.ask(.all(.a), $plan) }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Update all") { updater.ask(.all(.a), $plan) }
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
+                .disabled(updater.isUpdating)
                 .padding(14)
-                .background(Color.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                .background(n == 0 ? Color(.secondarySystemGroupedBackground) : Color.blue.opacity(0.18),
+                            in: RoundedRectangle(cornerRadius: 14))
             }
 
             PartCard(chip: .application, updater: updater) { updater.ask($0, $plan) }
