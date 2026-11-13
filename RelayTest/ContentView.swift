@@ -175,6 +175,7 @@ struct SensorCell: View {
                 Toggle("", isOn: Binding(get: { row.enabled },
                                          set: { relay.setEnabled(row.id, $0) }))
                     .labelsHidden()
+                    .disabled(row.id == Relay.signalSensor) // the connection indicator: always on
             }
             if row.enabled {
                 Text(row.failedText ?? row.text)

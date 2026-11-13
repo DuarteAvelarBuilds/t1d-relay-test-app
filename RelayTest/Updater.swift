@@ -91,6 +91,8 @@ final class Updater: ObservableObject {
     var control: CBCharacteristic?
     /// Turns the sensor stream off for the transfer.
     var stopStreams: () -> Void = {}
+    /// Called when an update ends (done or stopped), to bring the streams back.
+    var resumeStreams: () -> Void = {}
 
     private var image = Data()
     private var acked = 0
@@ -425,6 +427,7 @@ final class Updater: ObservableObject {
         timer = nil
         busy = nil
         message = text
+        resumeStreams()
     }
 
     private func arm(_ seconds: TimeInterval, tries limit: Int = 3, _ retry: @escaping () -> Void) {
