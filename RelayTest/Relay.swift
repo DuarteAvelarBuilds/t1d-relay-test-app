@@ -43,6 +43,8 @@ final class Relay: NSObject, ObservableObject {
     @Published var rows: [SensorRow] = Sensors.forBoard("").map { SensorRow(id: $0.id, interval: $0.defaultInterval) }
     @Published var info = ""
     @Published var linkRssi: Int?
+    /// The relay's LTE signal (RSRP, dBm), nil when not known or too old.
+    @Published var lteRsrp: Int?
     let updater = Updater()
     let compass = CompassModel()
 
@@ -147,6 +149,7 @@ final class Relay: NSObject, ObservableObject {
 
     private func startAll() {
         live = [:]
+        if updater.lte.state == .installing { updater.lte = Updater.LteStatus() }
         for row in rows where row.enabled {
             sendRate(row.id, row.interval)
         }
@@ -157,6 +160,10 @@ final class Relay: NSObject, ObservableObject {
     }
 
     private func handle(_ r: Reading) {
+        if r.sensor == 9 { // LTE update progress: not a row on the screen
+            if !r.failed { updater.lteSample(r.values) }
+            return
+        }
         var l = live[r.sensor] ?? Live()
         let now = Date()
         if let last = l.lastSeq {
@@ -201,6 +208,11 @@ final class Relay: NSObject, ObservableObject {
                 rows[i].text = def.kind == "compass" ? compass.text(l.values) : def.format(l.values)
             }
         }
+        if let l = live[6], let last = l.lastUpdate, now.timeIntervalSince(last) < 5, let v = l.values.first, v != 0 {
+            lteRsrp = Int(v)
+        } else {
+            lteRsrp = nil
+        }
         peripheral?.readRSSI()
         // The application's version and serial reach the Info text a little
         // after connecting, so read it again now and then.
@@ -217,6 +229,7 @@ final class Relay: NSObject, ObservableObject {
         control = nil
         infoChar = nil
         linkRssi = nil
+        lteRsrp = nil
         updater.connectionLost(userAsked: userDisconnected)
         updater.peripheral = nil
         updater.smp = nil
