@@ -27,6 +27,36 @@ final class Updater: ObservableObject {
         let size: Int
     }
 
+    /// Where an application update over LTE stands (sensor 9 from the relay;
+    /// firmware application 0.5.12 and later). The relay only does it when
+    /// asked: it costs data on its SIM.
+    struct LteStatus: Equatable {
+        enum State: Int32 { case idle = 0, looking, newest, found, downloading, installing, failed }
+        var state = State.idle
+        /// Download progress in %, or the error number when it failed.
+        var value = 0
+        var size = 0
+        var version = ""
+    }
+    @Published var lte = LteStatus()
+    var lteBusy: Bool { [.looking, .downloading, .installing].contains(lte.state) }
+
+    /// 0 = look up the newest release and its size, 1 = download and install.
+    func lteRequest(_ cmd: UInt8) {
+        guard let p = peripheral, let c = control else { return }
+        if cmd == 0 { lte = LteStatus(state: .looking) }
+        p.writeValue(Data([4, cmd]), for: c, type: .withResponse)
+        Log.update.notice("t=\(Log.ms()) LTE update request \(cmd)")
+    }
+
+    func lteSample(_ v: [Int32]) {
+        guard v.count >= 4, let s = LteStatus.State(rawValue: v[0]) else { return }
+        let code = Int(v[3])
+        lte = LteStatus(state: s, value: Int(v[1]), size: Int(v[2]),
+                        version: code == 0 ? "" : "\(code / 10000).\(code / 100 % 100).\(code % 100)")
+        Log.update.notice("t=\(Log.ms()) LTE update state \(v[0]) value \(v[1]) size \(v[2]) version \(self.lte.version, privacy: .public)")
+    }
+
     @Published var controllerVersion = "?"
     @Published var applicationVersion = "?"
     @Published var serial = ""
@@ -347,6 +377,7 @@ final class Updater: ObservableObject {
 
     /// From Relay when the Bluetooth connection ends.
     func connectionLost(userAsked: Bool) {
+        if lte.state != .installing { lte = LteStatus() }
         if userAsked {
             if busy != nil || resumeChip != nil {
                 finish("Stopped: you disconnected. Nothing was installed.")

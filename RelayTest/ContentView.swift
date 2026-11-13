@@ -85,6 +85,7 @@ struct SensorList: View {
                     }
                 }
                 .font(.footnote)
+                LteSignalRow(rsrp: relay.lteRsrp, lteOn: relay.rows.first(where: { $0.id == 6 })?.enabled ?? false)
                 Button("Disconnect", role: .destructive) { relay.disconnect() }
             }
             FirmwareSection(updater: relay.updater)
@@ -131,6 +132,7 @@ struct FirmwareSection: View {
             }
             Button(updater.checked ? "Check again" : "Check for updates") { updater.check() }
                 .disabled(updater.busy != nil || updater.updatingAll)
+            LteUpdateRows(updater: updater)
         }
     }
 
@@ -275,6 +277,82 @@ struct Sparkline: View {
                 }
             }
             .stroke(Color.accentColor, lineWidth: 1.5)
+        }
+    }
+}
+
+/// How strong the relay's LTE signal is, as bars (RSRP, the usual cellular measure).
+struct LteSignalRow: View {
+    let rsrp: Int?
+    let lteOn: Bool
+
+    /// 0 none ... 1 poor (below -115 dBm), 2 fair, 3 good, 4 excellent (above -90 dBm).
+    static func bars(_ rsrp: Int) -> Int {
+        switch rsrp {
+        case (-90)...: return 4
+        case (-105)...: return 3
+        case (-115)...: return 2
+        default: return 1
+        }
+    }
+
+    static func word(_ bars: Int) -> String {
+        ["no signal", "poor", "fair", "good", "excellent"][bars]
+    }
+
+    var body: some View {
+        HStack {
+            Image(systemName: "cellularbars", variableValue: Double(rsrp.map(Self.bars) ?? 0) / 4)
+                .foregroundStyle(rsrp == nil ? Color.secondary : Color.primary)
+            if let r = rsrp {
+                Text("LTE \(Self.word(Self.bars(r))) · \(r) dBm")
+            } else {
+                Text(lteOn ? "LTE: no signal yet" : "LTE signal: turn the LTE sensor on")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .font(.footnote)
+    }
+}
+
+/// Update the application over the relay's own LTE connection (no phone data,
+/// but it uses the relay's SIM: about 0.3 MB). Always asks first.
+struct LteUpdateRows: View {
+    @ObservedObject var updater: Updater
+
+    private func megabytes(_ bytes: Int) -> String { String(format: "%.2f MB", Double(bytes) / 1_000_000) }
+
+    var body: some View {
+        let s = updater.lte
+        Group {
+            switch s.state {
+            case .idle:
+                EmptyView()
+            case .looking:
+                Label("Asking the cloud, over the relay's LTE…", systemImage: "antenna.radiowaves.left.and.right")
+            case .newest:
+                Text("Over LTE: the application is already the newest release.")
+            case .found:
+                Text("Over LTE: newest application is \(s.version), \(megabytes(s.size)) to download.")
+                Button("Download and install \(s.version) over LTE (\(megabytes(s.size)))") { updater.lteRequest(1) }
+                    .buttonStyle(.bordered)
+                    .disabled(updater.busy != nil || updater.updatingAll)
+            case .downloading:
+                ProgressView(value: Double(s.value) / 100) {
+                    Text("Downloading \(s.version) over LTE… \(s.value) %")
+                }
+            case .installing:
+                Text("Downloaded. The application restarts on the new version; reconnect to check it.")
+            case .failed:
+                Text("The LTE update didn't work (error \(s.value)). Nothing was installed.")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .font(.footnote)
+        if !updater.lteBusy {
+            Button("Check over LTE (needs application 0.5.12)") { updater.lteRequest(0) }
+                .disabled(updater.busy != nil || updater.updatingAll)
         }
     }
 }
