@@ -134,6 +134,14 @@ final class Relay: NSObject, ObservableObject {
         sendRate(id, on ? rows[i].interval : 0)
     }
 
+    /// Every sensor on or off at once. The LTE signal stays on.
+    func setAll(_ on: Bool) {
+        for i in rows.indices where rows[i].id != Self.signalSensor {
+            rows[i].enabled = on
+            sendRate(rows[i].id, on ? rows[i].interval : 0)
+        }
+    }
+
     func setInterval(_ id: UInt8, _ ms: Int) {
         guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
         rows[i].interval = ms

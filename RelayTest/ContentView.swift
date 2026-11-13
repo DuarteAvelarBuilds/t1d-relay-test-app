@@ -121,7 +121,15 @@ struct SensorList: View {
                     }
                 }
             } header: {
-                Text("Sensors")
+                HStack {
+                    Text("Sensors")
+                    Spacer()
+                    Button("All on") { relay.setAll(true) }
+                    Text("·")
+                    Button("All off") { relay.setAll(false) }
+                }
+                .textCase(nil)
+                .buttonStyle(.borderless)
             } footer: {
                 Text("LTE signal is always on. Change how often it polls in Board details.")
             }
